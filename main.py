@@ -550,13 +550,13 @@ class FlowApp(ctk.CTk):
             fg_color="#24443D", corner_radius=8,
             font=ctk.CTkFont(size=11, weight="bold"), width=82, height=26,
         )
-        self.package_badge.grid(row=0, column=2, padx=(6, 16), pady=(16, 0))
+        self.package_badge.grid(row=2, column=1, pady=(8, 0), sticky="w")
         ctk.CTkLabel(
             item, text=str(path), text_color=self.MUTED,
             font=ctk.CTkFont(size=11), anchor="w", wraplength=270,
-        ).grid(row=2, column=0, columnspan=3, padx=16, pady=(12, 14), sticky="ew")
+        ).grid(row=3, column=0, columnspan=2, padx=16, pady=(12, 14), sticky="ew")
         actions = ctk.CTkFrame(item, fg_color="transparent")
-        actions.grid(row=3, column=0, columnspan=3, padx=16, pady=(0, 16), sticky="ew")
+        actions.grid(row=4, column=0, columnspan=2, padx=16, pady=(0, 16), sticky="ew")
         actions.grid_columnconfigure(0, weight=1)
         actions.grid_columnconfigure(1, weight=1)
         self.package_start_button = ctk.CTkButton(
