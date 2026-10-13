@@ -131,6 +131,7 @@ class FlowApp(ctk.CTk):
         self._nav_highlight_job = None
         self.models_frame = None
         self.install_dialog = None
+        self.package_settings_dialog = None
         self.webui_process = None
         self._package_poll_job = None
         self.package_badge = None
@@ -580,10 +581,65 @@ class FlowApp(ctk.CTk):
             self._update_package_widgets()
 
     def _open_package_settings(self):
+        if (self.package_settings_dialog is not None
+                and self.package_settings_dialog.winfo_exists()):
+            self.package_settings_dialog.lift()
+            return
+        packages = installed_packages()
+        if not packages:
+            self.install_status.configure(text="Пакет ещё не установлен")
+            return
+        name, path = packages[0]
+        window = ctk.CTkToplevel(self, fg_color=self.BACKGROUND)
+        self.package_settings_dialog = window
+        window.title("Параметры пакета · Flow")
+        window.geometry("560x310")
+        window.minsize(500, 300)
+        window.transient(self)
+        window.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            window, text="Параметры пакета", text_color=self.TEXT,
+            font=ctk.CTkFont(size=23, weight="bold"),
+        ).grid(row=0, column=0, padx=24, pady=(22, 14), sticky="w")
+        card = self._card(window)
+        card.grid(row=1, column=0, padx=24, sticky="ew")
+        card.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            card, text=name, text_color=self.TEXT,
+            font=ctk.CTkFont(size=17, weight="bold"),
+        ).grid(row=0, column=0, padx=18, pady=(16, 2), sticky="w")
+        ctk.CTkLabel(
+            card, text=f"Версия: {package_version()}", text_color=self.MUTED,
+        ).grid(row=1, column=0, padx=18, sticky="w")
+        ctk.CTkLabel(
+            card, text=str(path), text_color=self.MUTED,
+            wraplength=460, justify="left",
+        ).grid(row=2, column=0, padx=18, pady=(8, 16), sticky="w")
+        status = ctk.CTkLabel(window, text="", text_color=self.MUTED)
+        status.grid(row=2, column=0, padx=24, pady=(8, 0), sticky="w")
+        actions = ctk.CTkFrame(window, fg_color="transparent")
+        actions.grid(row=3, column=0, padx=24, pady=(8, 20), sticky="ew")
+        actions.grid_columnconfigure(0, weight=1)
+        ctk.CTkButton(
+            actions, text="Открыть настройки WebUI", height=40,
+            fg_color=self.ACCENT, hover_color=self.ACCENT_HOVER,
+            command=lambda: self._edit_package_settings(status),
+        ).grid(row=0, column=0, padx=(0, 8), sticky="ew")
+        ctk.CTkButton(
+            actions, text="Закрыть", width=100, height=40,
+            fg_color=self.HOVER, hover_color=self.BORDER,
+            command=window.destroy,
+        ).grid(row=0, column=1)
+        window.after(100, window.grab_set)
+
+    @staticmethod
+    def _edit_package_settings(status):
         try:
             open_package_settings()
         except (InstallationError, OSError) as exc:
-            self.install_status.configure(text=f"Не удалось открыть настройки: {exc}")
+            status.configure(text=f"Не удалось открыть файл: {exc}")
+        else:
+            status.configure(text="Файл настроек открыт во внешнем редакторе")
 
     def _update_package_widgets(self):
         running = self.webui_process is not None and self.webui_process.poll() is None
