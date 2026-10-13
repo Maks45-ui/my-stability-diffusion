@@ -86,6 +86,8 @@ class FlowApp(ctk.CTk):
 
     EXPANDED_WIDTH = 220
     COLLAPSED_WIDTH = 70
+    NAV_HIGHLIGHT_STEPS = 5
+    NAV_HIGHLIGHT_FRAME_MS = 20
     NAV_ITEMS = (
         ("Главная", "home.png", "⌂"),
         ("Галерея", "gallery.png", "▦"),
@@ -118,6 +120,8 @@ class FlowApp(ctk.CTk):
         self.sidebar_expanded = True
         self.active_page = "Главная"
         self.nav_buttons = {}
+        self._nav_colors = {}
+        self._nav_highlight_job = None
         self.discord_presence = DiscordPresence()
 
         self._build_sidebar()
@@ -275,18 +279,74 @@ class FlowApp(ctk.CTk):
                 anchor="w",
             )
 
-    def _refresh_navigation(self):
+    @staticmethod
+    def _blend_color(start, end, amount):
+        channels = (
+            round(int(start[index:index + 2], 16) * (1 - amount)
+                  + int(end[index:index + 2], 16) * amount)
+            for index in (1, 3, 5)
+        )
+        return "#" + "".join(f"{channel:02X}" for channel in channels)
+
+    def _refresh_navigation(self, animate=False):
+        if not animate and self._nav_highlight_job is not None:
+            return
+
+        if self._nav_highlight_job is not None:
+            self.after_cancel(self._nav_highlight_job)
+            self._nav_highlight_job = None
+
+        targets = {
+            name: self.ACCENT_HOVER if name == self.active_page else self.SIDEBAR
+            for name in self.nav_buttons
+        }
+        if not animate or not self._nav_colors:
+            self._nav_colors = targets
+            for name, (button, _) in self.nav_buttons.items():
+                selected = name == self.active_page
+                button.configure(
+                    fg_color=self.ACCENT_HOVER if selected else "transparent",
+                    hover_color=self.ACCENT if selected else self.HOVER,
+                    text_color=self.TEXT,
+                )
+            return
+
+        self._nav_start_colors = self._nav_colors.copy()
+        self._nav_target_colors = targets
+        self._nav_highlight_step = 0
+        self._nav_highlight_job = self.after(
+            self.NAV_HIGHLIGHT_FRAME_MS, self._animate_nav_highlight
+        )
+
+    def _animate_nav_highlight(self):
+        self._nav_highlight_job = None
+        self._nav_highlight_step += 1
+        progress = self._nav_highlight_step / self.NAV_HIGHLIGHT_STEPS
+        eased = progress * progress * (3 - 2 * progress)
+
         for name, (button, _) in self.nav_buttons.items():
-            selected = name == self.active_page
-            button.configure(
-                fg_color=self.ACCENT_HOVER if selected else "transparent",
-                hover_color=self.ACCENT if selected else self.HOVER,
-                text_color=self.TEXT,
+            color = self._blend_color(
+                self._nav_start_colors[name], self._nav_target_colors[name], eased
             )
+            self._nav_colors[name] = color
+            button.configure(fg_color=color, hover_color=color)
+
+        if self._nav_highlight_step < self.NAV_HIGHLIGHT_STEPS:
+            self._nav_highlight_job = self.after(
+                self.NAV_HIGHLIGHT_FRAME_MS, self._animate_nav_highlight
+            )
+        else:
+            for name, (button, _) in self.nav_buttons.items():
+                selected = name == self.active_page
+                button.configure(
+                    fg_color=self.ACCENT_HOVER if selected else "transparent",
+                    hover_color=self.ACCENT if selected else self.HOVER,
+                )
 
     def show_page(self, page_name):
+        animate = page_name != self.active_page
         self.active_page = page_name
-        self._refresh_navigation()
+        self._refresh_navigation(animate=animate)
         for widget in self.page_container.winfo_children():
             widget.destroy()
 
@@ -322,6 +382,8 @@ class FlowApp(ctk.CTk):
         self.discord_presence.set_page(page_name)
 
     def _on_close(self):
+        if self._nav_highlight_job is not None:
+            self.after_cancel(self._nav_highlight_job)
         self.discord_presence.close()
         self.destroy()
 
