@@ -164,11 +164,13 @@ class ModelsFrame(ctk.CTkFrame):
         for widget in self.results_list.winfo_children():
             widget.destroy()
         for index in range(4):
-            tile = ctk.CTkFrame(self.results_list, fg_color=self.app.SURFACE, corner_radius=12)
+            tile = ctk.CTkFrame(
+                self.results_list, width=150, fg_color=self.app.SURFACE, corner_radius=12,
+            )
             tile.grid(row=index // 2, column=index % 2, padx=6, pady=6, sticky="ew")
             tile.grid_columnconfigure(0, weight=1)
             ctk.CTkFrame(
-                tile, height=130, fg_color=self.app.HOVER, corner_radius=9,
+                tile, width=130, height=130, fg_color=self.app.HOVER, corner_radius=9,
             ).grid(row=0, column=0, padx=10, pady=(10, 12), sticky="ew")
             ctk.CTkFrame(
                 tile, height=12, width=112, fg_color=self.app.HOVER, corner_radius=5,
@@ -271,14 +273,16 @@ class ModelsFrame(ctk.CTkFrame):
             images = model_images(model)
             state = {"model": model, "images": images}
             card = ctk.CTkFrame(
-                self.results_list, corner_radius=12, fg_color=self.app.SURFACE,
+                self.results_list, width=175, corner_radius=12, fg_color=self.app.SURFACE,
             )
             card.grid(row=index // self.catalog_columns, column=index % self.catalog_columns,
                       padx=6, pady=6, sticky="ew")
             card.grid_columnconfigure(0, weight=1)
             self.model_cards.append(card)
             self.card_by_model[id(model)] = card
-            cover = ctk.CTkFrame(card, height=164, fg_color=self.app.HOVER, corner_radius=10)
+            cover = ctk.CTkFrame(
+                card, width=155, height=164, fg_color=self.app.HOVER, corner_radius=10,
+            )
             cover.grid(row=0, column=0, padx=9, pady=(9, 0), sticky="ew")
             cover.grid_propagate(False)
             cover_button = ctk.CTkButton(
@@ -300,7 +304,7 @@ class ModelsFrame(ctk.CTkFrame):
                 image_id = id(cover_button)
                 self.image_targets[image_id] = cover_button
                 self.image_tasks.put((self.search_generation, image_id, images[0],
-                                      (240, 164), "cover"))
+                                      (400, 260), "cover"))
             ctk.CTkLabel(
                 card, text=f"ID {model_id}  ·  {len(images)} примеров",
                 text_color=self.app.MUTED, font=ctk.CTkFont(size=11),
@@ -378,9 +382,7 @@ class ModelsFrame(ctk.CTkFrame):
                 continue
             try:
                 picture = self.client.load_image(url, size)
-                if style == "cover":
-                    picture = ImageOps.fit(picture, size, method=Image.Resampling.LANCZOS)
-                self.events.put(("thumbnail", generation, image_id, picture))
+                self.events.put(("thumbnail", generation, image_id, picture, style))
             except Exception:
                 self.events.put(("thumbnail_error", generation, image_id))
 
@@ -582,6 +584,13 @@ class ModelsFrame(ctk.CTkFrame):
                     button = self.image_targets.get(event[2])
                     if button is not None and button.winfo_exists():
                         picture = event[3]
+                        if event[4] == "cover":
+                            picture = ImageOps.fit(
+                                picture,
+                                (max(button.winfo_width(), 155),
+                                 max(button.winfo_height(), 164)),
+                                method=Image.Resampling.LANCZOS,
+                            )
                         photo = ctk.CTkImage(
                             light_image=picture, dark_image=picture, size=picture.size,
                         )
