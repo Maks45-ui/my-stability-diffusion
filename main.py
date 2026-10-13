@@ -1,11 +1,14 @@
 from pathlib import Path
 import sys
+import threading
 from tkinter import TclError
 
 import customtkinter as ctk
 from PIL import Image, ImageTk
 
 from discord_presence import DiscordPresence
+from install_dialog import InstallDialog
+from installer import InstallationError, installed_packages, launch_webui
 from models_frame import ModelsFrame
 
 
@@ -53,7 +56,7 @@ class SettingsFrame(ctk.CTkFrame):
         settings = (
             ("Тема интерфейса", "Тёмная"),
             ("Язык", "Русский"),
-            ("Установка пакетов", "Скоро"),
+            ("Установка пакетов", "AUTOMATIC1111 WebUI"),
         )
         for row, (title, value) in enumerate(settings, start=1):
             option = ctk.CTkFrame(card, corner_radius=10, fg_color=app.HOVER)
@@ -124,6 +127,7 @@ class FlowApp(ctk.CTk):
         self._nav_colors = {}
         self._nav_highlight_job = None
         self.models_frame = None
+        self.install_dialog = None
         self.discord_presence = DiscordPresence()
 
         self._build_sidebar()
@@ -392,6 +396,9 @@ class FlowApp(ctk.CTk):
     def _on_close(self):
         if self._nav_highlight_job is not None:
             self.after_cancel(self._nav_highlight_job)
+        if self.install_dialog is not None and self.install_dialog.winfo_exists():
+            if self.install_dialog.installing:
+                threading.Thread(target=self.install_dialog.installer.cancel, daemon=True).start()
         if self.models_frame is not None:
             self.models_frame.stop()
         self.discord_presence.close()
@@ -419,23 +426,46 @@ class FlowApp(ctk.CTk):
             font=ctk.CTkFont(size=20, weight="bold"),
         ).grid(row=0, column=0, padx=28, pady=(24, 0), sticky="w")
 
-        empty = ctk.CTkFrame(card, fg_color="transparent")
-        empty.grid(row=1, column=0)
-        ctk.CTkLabel(
-            empty, text="◈", text_color=self.ACCENT, font=ctk.CTkFont(size=50)
-        ).pack()
-        ctk.CTkLabel(
-            empty,
-            text="Пакетов пока нет",
-            text_color=self.TEXT,
-            font=ctk.CTkFont(size=20, weight="bold"),
-        ).pack(pady=(8, 4))
-        ctk.CTkLabel(
-            empty,
-            text="Когда вы добавите первый пакет, он появится здесь.",
-            text_color=self.MUTED,
-            font=ctk.CTkFont(size=14),
-        ).pack()
+        packages = installed_packages()
+        if packages:
+            list_frame = ctk.CTkFrame(card, fg_color="transparent")
+            list_frame.grid(row=1, column=0, padx=28, pady=24, sticky="nsew")
+            list_frame.grid_columnconfigure(0, weight=1)
+            for row, (name, path) in enumerate(packages):
+                item = ctk.CTkFrame(list_frame, fg_color=self.HOVER, corner_radius=12)
+                item.grid(row=row, column=0, pady=(0, 10), sticky="ew")
+                item.grid_columnconfigure(0, weight=1)
+                ctk.CTkLabel(
+                    item, text=name, text_color=self.TEXT,
+                    font=ctk.CTkFont(size=17, weight="bold"),
+                ).grid(row=0, column=0, padx=18, pady=(13, 2), sticky="w")
+                ctk.CTkLabel(
+                    item, text=str(path), text_color=self.MUTED,
+                    font=ctk.CTkFont(size=12), anchor="w",
+                ).grid(row=1, column=0, padx=18, pady=(0, 13), sticky="ew")
+                ctk.CTkButton(
+                    item, text="Запустить", width=115,
+                    fg_color=self.ACCENT, hover_color=self.ACCENT_HOVER,
+                    command=self._launch_webui,
+                ).grid(row=0, column=1, rowspan=2, padx=18)
+        else:
+            empty = ctk.CTkFrame(card, fg_color="transparent")
+            empty.grid(row=1, column=0)
+            ctk.CTkLabel(
+                empty, text="◈", text_color=self.ACCENT, font=ctk.CTkFont(size=50)
+            ).pack()
+            ctk.CTkLabel(
+                empty,
+                text="Пакетов пока нет",
+                text_color=self.TEXT,
+                font=ctk.CTkFont(size=20, weight="bold"),
+            ).pack(pady=(8, 4))
+            ctk.CTkLabel(
+                empty,
+                text="Когда вы добавите первый пакет, он появится здесь.",
+                text_color=self.MUTED,
+                font=ctk.CTkFont(size=14),
+            ).pack()
 
         ctk.CTkButton(
             body,
@@ -446,15 +476,31 @@ class FlowApp(ctk.CTk):
             fg_color=self.ACCENT,
             hover_color=self.ACCENT_HOVER,
             font=ctk.CTkFont(size=17, weight="bold"),
-            command=self._show_install_status,
+            command=self._open_install_dialog,
         ).grid(row=1, column=0, pady=(22, 4))
         self.install_status = ctk.CTkLabel(
             body, text="", text_color=self.MUTED, font=ctk.CTkFont(size=13)
         )
         self.install_status.grid(row=2, column=0)
 
-    def _show_install_status(self):
-        self.install_status.configure(text="Установка пока недоступна")
+    def _open_install_dialog(self):
+        if self.install_dialog is not None and self.install_dialog.winfo_exists():
+            self.install_dialog.lift()
+            self.install_dialog.focus()
+            return
+        self.install_dialog = InstallDialog(self, self._refresh_installed_packages)
+
+    def _refresh_installed_packages(self):
+        if self.active_page == "Главная":
+            self.show_page("Главная")
+
+    def _launch_webui(self):
+        try:
+            launch_webui()
+        except (InstallationError, OSError) as exc:
+            self.install_status.configure(text=f"Ошибка запуска: {exc}")
+        else:
+            self.install_status.configure(text="WebUI запускается в отдельном окне консоли")
 
     def _render_gallery(self, body):
         card = self._card(body)
