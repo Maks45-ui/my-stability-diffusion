@@ -1,4 +1,4 @@
-name: Build Windows app
+name: Build Flow for Windows
 
 on:
   push:
@@ -29,12 +29,11 @@ jobs:
         shell: pwsh
         run: |
           $packagePath = (python -c "import pathlib, customtkinter; print(pathlib.Path(customtkinter.__file__).parent)").Trim()
-          python -m PyInstaller --noconfirm --clean --onedir --windowed --name MyStabilityMatrix --add-data "${packagePath};customtkinter" main.py
+          python -m PyInstaller --noconfirm --clean --onedir --windowed --name Flow --add-data "${packagePath};customtkinter" --add-data "assets;assets" main.py
 
       - name: Upload Windows build
         uses: actions/upload-artifact@v7
         with:
-          name: MyStabilityMatrix-Windows
-          path: dist/MyStabilityMatrix/
+          name: Flow-Windows
+          path: dist/Flow/
           if-no-files-found: error
-

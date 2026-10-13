@@ -1,10 +1,14 @@
+from pathlib import Path
+import sys
+
 import customtkinter as ctk
+from PIL import Image, ImageTk
 
 
 ctk.set_default_color_theme("blue")
 
 
-class StabilityMatrixApp(ctk.CTk):
+class FlowApp(ctk.CTk):
     PAGES = {
         "Главная": "Добро пожаловать! Здесь появится обзор установленных приложений и моделей.",
         "Установка приложений": "Здесь можно будет устанавливать приложения для запуска нейросетей.",
@@ -13,23 +17,33 @@ class StabilityMatrixApp(ctk.CTk):
 
     def __init__(self):
         super().__init__()
-        self.title("My Stability Matrix")
+        self.title("Flow")
         self.geometry("960x600")
         self.minsize(760, 480)
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
+
+        assets_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / "assets"
+        with Image.open(assets_dir / "logo.png") as image:
+            logo = image.convert("RGBA")
+        self.logo_image = ctk.CTkImage(light_image=logo, dark_image=logo, size=(72, 72))
+        self.window_icon = ImageTk.PhotoImage(logo)
+        self.after(250, lambda: self.wm_iconphoto(True, self.window_icon))
 
         sidebar = ctk.CTkFrame(self, width=230, corner_radius=0)
         sidebar.grid(row=0, column=0, sticky="nsew")
         sidebar.grid_propagate(False)
         sidebar.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(
-            sidebar, text="My Stability Matrix", font=ctk.CTkFont(size=19, weight="bold")
-        ).grid(row=0, column=0, padx=20, pady=(28, 32), sticky="w")
+        ctk.CTkLabel(sidebar, image=self.logo_image, text="").grid(
+            row=0, column=0, padx=20, pady=(24, 8), sticky="w"
+        )
+        ctk.CTkLabel(sidebar, text="Flow", font=ctk.CTkFont(size=22, weight="bold")).grid(
+            row=1, column=0, padx=20, pady=(0, 28), sticky="w"
+        )
 
         self.nav_buttons = {}
-        for row, page_name in enumerate(self.PAGES, start=1):
+        for row, page_name in enumerate(self.PAGES, start=2):
             button = ctk.CTkButton(
                 sidebar,
                 text=page_name,
@@ -70,5 +84,4 @@ class StabilityMatrixApp(ctk.CTk):
 
 
 if __name__ == "__main__":
-    StabilityMatrixApp().mainloop()
-
+    FlowApp().mainloop()
