@@ -4,6 +4,7 @@ from queue import Empty, Queue
 import threading
 
 import customtkinter as ctk
+from PIL import Image, ImageOps
 
 from civitai import (
     CivitaiClient, CivitaiError, DownloadCancelled, ModelFile,
@@ -26,6 +27,9 @@ class ModelsFrame(ctk.CTkFrame):
         self.image_tasks = Queue()
         self.image_targets = {}
         self.thumbnail_refs = {}
+        self.model_cards = []
+        self.card_by_model = {}
+        self.catalog_columns = 1
         self.viewer = None
         self.viewer_generation = 0
         self.stopping = threading.Event()
@@ -33,19 +37,20 @@ class ModelsFrame(ctk.CTkFrame):
         for _ in range(4):
             threading.Thread(target=self._image_worker, daemon=True).start()
 
-        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=3)
+        self.grid_columnconfigure(1, weight=2)
 
         ctk.CTkLabel(
             self, text="Загрузка моделей", text_color=app.TEXT,
             font=ctk.CTkFont(size=30, weight="bold"),
-        ).grid(row=0, column=0, sticky="w")
+        ).grid(row=0, column=0, columnspan=2, sticky="w")
         ctk.CTkLabel(
             self, text="Найдите модель на Civitai и выберите файл для скачивания.",
             text_color=app.MUTED, font=ctk.CTkFont(size=15),
-        ).grid(row=1, column=0, pady=(4, 16), sticky="w")
+        ).grid(row=1, column=0, columnspan=2, pady=(4, 16), sticky="w")
 
         search_card = self._card()
-        search_card.grid(row=2, column=0, sticky="new")
+        search_card.grid(row=2, column=0, columnspan=2, sticky="ew")
         search_card.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
             search_card, text="Поиск по названию или ID", text_color=app.TEXT,
@@ -65,11 +70,11 @@ class ModelsFrame(ctk.CTkFrame):
         self.search_button.grid(row=1, column=1, padx=(0, 20), pady=(0, 16))
 
         results_card = self._card()
-        results_card.grid(row=3, column=0, pady=(12, 0), sticky="nsew")
+        results_card.grid(row=3, column=0, padx=(0, 12), pady=(12, 0), sticky="nsew")
         results_card.grid_columnconfigure(0, weight=1)
         results_card.grid_rowconfigure(1, weight=1)
         ctk.CTkLabel(
-            results_card, text="Лента моделей", text_color=app.TEXT,
+            results_card, text="Каталог Civitai", text_color=app.TEXT,
             font=ctk.CTkFont(size=17, weight="bold"),
         ).grid(row=0, column=0, padx=20, pady=(14, 4), sticky="w")
         self.results_list = ctk.CTkScrollableFrame(
@@ -77,10 +82,20 @@ class ModelsFrame(ctk.CTkFrame):
         )
         self.results_list.grid(row=1, column=0, padx=14, pady=(0, 12), sticky="nsew")
         self.results_list.grid_columnconfigure(0, weight=1)
-        self._show_results_message("Загружаем модели Civitai…")
+        self.results_list.grid_columnconfigure(1, weight=1)
+        self.results_list.bind("<Configure>", self._layout_model_cards)
+        self._show_loading_skeletons()
 
-        download_card = self._card()
-        download_card.grid(row=4, column=0, pady=(12, 0), sticky="ew")
+        details = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        details.grid(row=3, column=1, pady=(12, 0), sticky="nsew")
+        details.grid_columnconfigure(0, weight=1)
+        self.preview_card = self._card(details)
+        self.preview_card.grid(row=0, column=0, sticky="ew")
+        self.preview_card.grid_columnconfigure(0, weight=1)
+        self._show_preview_message()
+
+        download_card = self._card(details)
+        download_card.grid(row=1, column=0, pady=(12, 0), sticky="ew")
         download_card.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
             download_card, text="Скачать файл", text_color=app.TEXT,
@@ -88,7 +103,7 @@ class ModelsFrame(ctk.CTkFrame):
         ).grid(row=0, column=0, columnspan=2, padx=20, pady=(14, 3), sticky="w")
         self.selected_label = ctk.CTkLabel(
             download_card, text="Сначала выберите модель из результатов.",
-            text_color=app.MUTED, anchor="w",
+            text_color=app.MUTED, anchor="w", wraplength=210, justify="left",
         )
         self.selected_label.grid(row=1, column=0, columnspan=2, padx=20, sticky="ew")
         self.file_menu = ctk.CTkOptionMenu(
@@ -97,46 +112,94 @@ class ModelsFrame(ctk.CTkFrame):
             button_color=app.ACCENT_HOVER, button_hover_color=app.ACCENT,
             state="disabled",
         )
-        self.file_menu.grid(row=2, column=0, padx=(20, 8), pady=(8, 10), sticky="ew")
+        self.file_menu.grid(row=2, column=0, columnspan=2,
+                            padx=20, pady=(8, 10), sticky="ew")
         self.download_button = ctk.CTkButton(
             download_card, text="Скачать", width=108, height=36, corner_radius=9,
             fg_color=app.ACCENT, hover_color=app.ACCENT_HOVER,
             state="disabled", command=self._start_download,
         )
-        self.download_button.grid(row=2, column=1, padx=(0, 20), pady=(8, 10))
+        self.download_button.grid(row=3, column=0, columnspan=2,
+                                  padx=20, pady=(0, 12), sticky="ew")
         self.progress = ctk.CTkProgressBar(
             download_card, height=10, progress_color=app.ACCENT,
         )
-        self.progress.grid(row=3, column=0, columnspan=2, padx=20, sticky="ew")
+        self.progress.grid(row=4, column=0, columnspan=2, padx=20, sticky="ew")
         self.progress.set(0)
         self.status_label = ctk.CTkLabel(
             download_card, text=f"Файлы сохраняются в {models_directory()}",
-            text_color=app.MUTED, anchor="w", wraplength=700,
+            text_color=app.MUTED, anchor="w", wraplength=210, justify="left",
         )
-        self.status_label.grid(row=4, column=0, padx=(20, 8), pady=(5, 14), sticky="ew")
+        self.status_label.grid(row=5, column=0, columnspan=2,
+                               padx=20, pady=(8, 2), sticky="ew")
         self.cancel_button = ctk.CTkButton(
             download_card, text="Отмена", width=108, height=30,
             fg_color="transparent", hover_color=app.HOVER,
             state="disabled", command=self._cancel_download,
         )
-        self.cancel_button.grid(row=4, column=1, padx=(0, 20), pady=(5, 14))
+        self.cancel_button.grid(row=6, column=0, columnspan=2,
+                                padx=20, pady=(0, 16), sticky="ew")
 
         self.grid_rowconfigure(3, weight=1)
         self.poll_job = self.after(100, self._poll_events)
         self._start_search()
 
-    def _card(self):
+    def _card(self, parent=None):
         return ctk.CTkFrame(
-            self, corner_radius=18, fg_color=self.app.CARD,
-            border_width=1, border_color=self.app.BORDER,
+            parent or self, corner_radius=16, fg_color=self.app.CARD,
         )
 
     def _show_results_message(self, message):
+        self.model_cards = []
+        self.card_by_model = {}
         for widget in self.results_list.winfo_children():
             widget.destroy()
         ctk.CTkLabel(
             self.results_list, text=message, text_color=self.app.MUTED,
         ).grid(row=0, column=0, padx=8, pady=12, sticky="w")
+
+    def _show_loading_skeletons(self):
+        self.model_cards = []
+        self.card_by_model = {}
+        for widget in self.results_list.winfo_children():
+            widget.destroy()
+        for index in range(4):
+            tile = ctk.CTkFrame(self.results_list, fg_color=self.app.SURFACE, corner_radius=12)
+            tile.grid(row=index // 2, column=index % 2, padx=6, pady=6, sticky="ew")
+            tile.grid_columnconfigure(0, weight=1)
+            ctk.CTkFrame(
+                tile, height=130, fg_color=self.app.HOVER, corner_radius=9,
+            ).grid(row=0, column=0, padx=10, pady=(10, 12), sticky="ew")
+            ctk.CTkFrame(
+                tile, height=12, width=112, fg_color=self.app.HOVER, corner_radius=5,
+            ).grid(row=1, column=0, padx=10, pady=(0, 8), sticky="w")
+            ctk.CTkFrame(
+                tile, height=9, width=72, fg_color=self.app.HOVER, corner_radius=5,
+            ).grid(row=2, column=0, padx=10, pady=(0, 12), sticky="w")
+
+    def _show_preview_message(self):
+        for widget in self.preview_card.winfo_children():
+            widget.destroy()
+        ctk.CTkLabel(
+            self.preview_card, text="Детали модели", text_color=self.app.TEXT,
+            font=ctk.CTkFont(size=17, weight="bold"),
+        ).grid(row=0, column=0, padx=18, pady=(18, 8), sticky="w")
+        ctk.CTkLabel(
+            self.preview_card,
+            text="Выберите обложку в каталоге, чтобы увидеть все примеры и доступные файлы.",
+            text_color=self.app.MUTED, wraplength=210, justify="left",
+        ).grid(row=1, column=0, padx=18, pady=(0, 18), sticky="w")
+
+    def _layout_model_cards(self, _event=None):
+        columns = 2 if self.results_list.winfo_width() >= 445 else 1
+        if columns == self.catalog_columns:
+            return
+        self.catalog_columns = columns
+        self.results_list.grid_columnconfigure(1, weight=1 if columns == 2 else 0)
+        for index, card in enumerate(self.model_cards):
+            if card.winfo_exists():
+                card.grid(row=index // columns, column=index % columns,
+                          padx=6, pady=6, sticky="ew")
 
     def _set_busy(self, operation=None):
         self.busy = operation
@@ -174,7 +237,8 @@ class ModelsFrame(ctk.CTkFrame):
         self.file_menu.set("Нет выбранного файла")
         self.selected_label.configure(text="Сначала выберите модель из результатов.")
         self._set_busy("search")
-        self._show_results_message("Ищем модели на Civitai…" if query else "Загружаем ленту…")
+        self._show_loading_skeletons()
+        self._show_preview_message()
         self.status_label.configure(text="Поиск моделей…" if query else "Загрузка ленты…")
         threading.Thread(
             target=self._search_worker, args=(query, generation), daemon=True
@@ -196,51 +260,91 @@ class ModelsFrame(ctk.CTkFrame):
             return
         for widget in self.results_list.winfo_children():
             widget.destroy()
-        for row, model in enumerate(models):
+        self.model_cards = []
+        self.card_by_model = {}
+        self.catalog_columns = 2 if self.results_list.winfo_width() >= 445 else 1
+        self.results_list.grid_columnconfigure(1, weight=1 if self.catalog_columns == 2 else 0)
+        for index, model in enumerate(models):
             name = str(model.get("name") or "Без названия")
             kind = model.get("type", "Модель")
             model_id = model.get("id", "?")
+            images = model_images(model)
+            state = {"model": model, "images": images}
             card = ctk.CTkFrame(
-                self.results_list, corner_radius=12, fg_color=self.app.HOVER,
+                self.results_list, corner_radius=12, fg_color=self.app.SURFACE,
             )
-            card.grid(row=row, column=0, padx=6, pady=7, sticky="ew")
+            card.grid(row=index // self.catalog_columns, column=index % self.catalog_columns,
+                      padx=6, pady=6, sticky="ew")
             card.grid_columnconfigure(0, weight=1)
+            self.model_cards.append(card)
+            self.card_by_model[id(model)] = card
+            cover = ctk.CTkFrame(card, height=164, fg_color=self.app.HOVER, corner_radius=10)
+            cover.grid(row=0, column=0, padx=9, pady=(9, 0), sticky="ew")
+            cover.grid_propagate(False)
+            cover_button = ctk.CTkButton(
+                cover, text="▧" if not images else "Загрузка…",
+                corner_radius=9, fg_color=self.app.HOVER,
+                hover_color=self.app.ACCENT_HOVER, text_color=self.app.MUTED,
+                command=(lambda current=state: self._open_cover(current))
+                if images else (lambda selected=model: self._select_model(selected)),
+            )
+            cover_button.place(relx=0, rely=0, relwidth=1, relheight=1)
             ctk.CTkButton(
-                card, text=f"{name[:65]}  ·  {kind}  ·  ID {model_id}",
-                anchor="w", height=38, corner_radius=8,
-                fg_color="transparent", hover_color=self.app.CARD,
+                cover, text=f"{name[:28]}\n{kind}",
+                anchor="w", height=56, corner_radius=0,
+                fg_color="#17212C", hover_color="#203246",
+                text_color=self.app.TEXT, font=ctk.CTkFont(size=13, weight="bold"),
                 command=lambda selected=model: self._select_model(selected),
-            ).grid(row=0, column=0, padx=(10, 6), pady=(7, 3), sticky="ew")
+            ).place(relx=0, rely=1, anchor="sw", relwidth=1)
+            if images:
+                image_id = id(cover_button)
+                self.image_targets[image_id] = cover_button
+                self.image_tasks.put((self.search_generation, image_id, images[0],
+                                      (240, 164), "cover"))
+            ctk.CTkLabel(
+                card, text=f"ID {model_id}  ·  {len(images)} примеров",
+                text_color=self.app.MUTED, font=ctk.CTkFont(size=11),
+            ).grid(row=1, column=0, padx=12, pady=(8, 4), sticky="w")
             ctk.CTkButton(
-                card, text="Скачать", width=98, height=32, corner_radius=8,
+                card, text="Скачать модель  ↓", height=34, corner_radius=8,
                 fg_color=self.app.ACCENT, hover_color=self.app.ACCENT_HOVER,
                 command=lambda selected=model: self._download_model(selected),
-            ).grid(row=0, column=1, padx=(0, 12), pady=(7, 3))
+            ).grid(row=2, column=0, padx=9, pady=(0, 9), sticky="ew")
+        self.status_label.configure(text=f"Моделей в каталоге: {len(models)}. Выберите обложку или модель.")
 
-            images = model_images(model)
-            if images:
-                gallery = ctk.CTkScrollableFrame(
-                    card, orientation="horizontal", height=112,
-                    fg_color="transparent",
-                )
-                gallery.grid(row=1, column=0, columnspan=2, padx=8, sticky="ew")
-                more_button = ctk.CTkButton(
-                    card, text="", height=26, width=120, anchor="w",
-                    fg_color="transparent", hover_color=self.app.CARD,
-                    text_color=self.app.MUTED,
-                )
-                more_button.grid(row=2, column=0, columnspan=2, padx=16, pady=(0, 6), sticky="w")
-                state = {
-                    "gallery": gallery, "more": more_button,
-                    "model": model, "images": images, "shown": 0,
-                }
-                more_button.configure(command=lambda current=state: self._add_image_batch(current))
-                self._add_image_batch(state)
-            else:
-                ctk.CTkLabel(
-                    card, text="Примеров изображений нет", text_color=self.app.MUTED,
-                ).grid(row=1, column=0, columnspan=2, padx=18, pady=(6, 14), sticky="w")
-        self.status_label.configure(text=f"Моделей в ленте: {len(models)}. Нажмите на модель или изображение.")
+    def _show_selected_preview(self, model):
+        for widget in self.preview_card.winfo_children():
+            widget.destroy()
+        images = model_images(model)
+        ctk.CTkLabel(
+            self.preview_card, text=str(model.get("name") or "Модель")[:55],
+            text_color=self.app.TEXT, font=ctk.CTkFont(size=17, weight="bold"),
+            wraplength=210, justify="left",
+        ).grid(row=0, column=0, padx=18, pady=(18, 3), sticky="w")
+        ctk.CTkLabel(
+            self.preview_card,
+            text=f"{model.get('type', 'Модель')}  ·  ID {model.get('id', '?')}  ·  {len(images)} примеров",
+            text_color=self.app.MUTED, font=ctk.CTkFont(size=11),
+        ).grid(row=1, column=0, padx=18, pady=(0, 12), sticky="w")
+        if not images:
+            ctk.CTkLabel(
+                self.preview_card, text="Примеров изображений нет", text_color=self.app.MUTED,
+            ).grid(row=2, column=0, padx=18, pady=(0, 18), sticky="w")
+            return
+        gallery = ctk.CTkScrollableFrame(
+            self.preview_card, orientation="horizontal", height=110,
+            fg_color="transparent",
+        )
+        gallery.grid(row=2, column=0, padx=12, sticky="ew")
+        more_button = ctk.CTkButton(
+            self.preview_card, text="", height=28, anchor="w", fg_color="transparent",
+            hover_color=self.app.HOVER, text_color=self.app.ACCENT,
+        )
+        more_button.grid(row=3, column=0, padx=18, pady=(4, 12), sticky="w")
+        state = {"gallery": gallery, "more": more_button,
+                 "model": model, "images": images, "shown": 0}
+        more_button.configure(command=lambda: self._add_image_batch(state))
+        self._add_image_batch(state)
 
     def _add_image_batch(self, state):
         images = state["images"]
@@ -255,7 +359,8 @@ class ModelsFrame(ctk.CTkFrame):
             button.grid(row=0, column=index, padx=4, pady=2)
             image_id = id(button)
             self.image_targets[image_id] = button
-            self.image_tasks.put((self.search_generation, image_id, images[index]))
+            self.image_tasks.put((self.search_generation, image_id, images[index],
+                                  (150, 100), "preview"))
         state["shown"] = min(start + 6, len(images))
         remaining = len(images) - state["shown"]
         if remaining:
@@ -266,16 +371,22 @@ class ModelsFrame(ctk.CTkFrame):
     def _image_worker(self):
         while not self.stopping.is_set():
             try:
-                generation, image_id, url = self.image_tasks.get(timeout=0.2)
+                generation, image_id, url, size, style = self.image_tasks.get(timeout=0.2)
             except Empty:
                 continue
             if generation != self.search_generation:
                 continue
             try:
-                picture = self.client.load_image(url, (150, 100))
+                picture = self.client.load_image(url, size)
+                if style == "cover":
+                    picture = ImageOps.fit(picture, size, method=Image.Resampling.LANCZOS)
                 self.events.put(("thumbnail", generation, image_id, picture))
             except Exception:
                 self.events.put(("thumbnail_error", generation, image_id))
+
+    def _open_cover(self, state):
+        self._select_model(state["model"])
+        self._open_viewer(state, 0)
 
     def _open_viewer(self, state, index):
         self._close_viewer()
@@ -368,6 +479,12 @@ class ModelsFrame(ctk.CTkFrame):
             self._close_viewer()
 
     def _select_model(self, model):
+        for card in self.model_cards:
+            if card.winfo_exists():
+                selected = card is self.card_by_model.get(id(model))
+                card.configure(border_width=2 if selected else 0,
+                               border_color=self.app.ACCENT if selected else self.app.SURFACE)
+        self._show_selected_preview(model)
         self.selected_label.configure(
             text=f"{model.get('name', 'Модель')}  ·  {model.get('type', '')}"
         )
