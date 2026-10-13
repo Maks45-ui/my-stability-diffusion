@@ -133,6 +133,7 @@ class FlowApp(ctk.CTk):
         self.install_dialog = None
         self.package_settings_dialog = None
         self.webui_process = None
+        self.package_error = None
         self._package_poll_job = None
         self.package_badge = None
         self.package_start_button = None
@@ -575,8 +576,11 @@ class FlowApp(ctk.CTk):
         try:
             self.webui_process = launch_webui()
         except (InstallationError, OSError) as exc:
+            self.package_error = str(exc)
             self.install_status.configure(text=f"Ошибка запуска: {exc}")
+            self._update_package_widgets()
         else:
+            self.package_error = None
             self.install_status.configure(text="WebUI запускается в отдельном окне консоли")
             self._update_package_widgets()
 
@@ -644,16 +648,21 @@ class FlowApp(ctk.CTk):
     def _update_package_widgets(self):
         running = self.webui_process is not None and self.webui_process.poll() is None
         if self.package_badge is not None and self.package_badge.winfo_exists():
-            self.package_badge.configure(
-                text="●  Запущен" if running else "●  Готов",
-                text_color=self.SUCCESS,
-            )
+            if running:
+                text, color, background = "●  Запущен", self.SUCCESS, "#24443D"
+            elif self.package_error:
+                text, color, background = "●  Ошибка", "#F19999", "#4B3034"
+            else:
+                text, color, background = "●  Готов", "#9CC9EA", "#27445C"
+            self.package_badge.configure(text=text, text_color=color, fg_color=background)
         if self.package_start_button is not None and self.package_start_button.winfo_exists():
             self.package_start_button.configure(state="disabled" if running else "normal")
 
     def _sync_package_status(self):
         self._package_poll_job = None
         if self.webui_process is not None and self.webui_process.poll() is not None:
+            if self.webui_process.returncode:
+                self.package_error = "WebUI завершился с ошибкой"
             self.webui_process = None
         self._update_package_widgets()
         self._package_poll_job = self.after(1500, self._sync_package_status)
