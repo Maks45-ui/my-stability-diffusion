@@ -101,7 +101,7 @@ fn get_state(app: AppHandle, webui: State<'_, installer::WebuiControl>) -> Resul
         let version = fs::read(&marker)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-            .and_then(|value| value.get("version").and_then(str::as_str).map(str::to_owned))
+            .and_then(|value| value.get("version").and_then(serde_json::Value::as_str).map(str::to_owned))
             .unwrap_or_else(|| "Установлен".to_owned());
         vec![PackageInfo {
             name: "AUTOMATIC1111 WebUI".to_owned(),
@@ -173,3 +173,4 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("failed to run Flow");
 }
+
