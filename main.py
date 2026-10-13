@@ -6,6 +6,7 @@ import customtkinter as ctk
 from PIL import Image, ImageTk
 
 from discord_presence import DiscordPresence
+from models_frame import ModelsFrame
 
 
 ctk.set_appearance_mode("dark")
@@ -122,6 +123,7 @@ class FlowApp(ctk.CTk):
         self.nav_buttons = {}
         self._nav_colors = {}
         self._nav_highlight_job = None
+        self.models_frame = None
         self.discord_presence = DiscordPresence()
 
         self._build_sidebar()
@@ -348,9 +350,16 @@ class FlowApp(ctk.CTk):
         self.active_page = page_name
         self._refresh_navigation(animate=animate)
         for widget in self.page_container.winfo_children():
-            widget.destroy()
+            if widget is self.models_frame:
+                widget.grid_remove()
+            else:
+                widget.destroy()
 
-        if page_name == "Настройки":
+        if page_name == "Загрузка моделей":
+            if self.models_frame is None:
+                self.models_frame = ModelsFrame(self.page_container, self)
+            self.models_frame.grid(row=0, column=0, rowspan=3, sticky="nsew")
+        elif page_name == "Настройки":
             SettingsFrame(self.page_container, self).grid(
                 row=0, column=0, rowspan=3, sticky="nsew"
             )
@@ -376,7 +385,6 @@ class FlowApp(ctk.CTk):
             render_page = {
                 "Главная": self._render_home,
                 "Галерея": self._render_gallery,
-                "Загрузка моделей": self._render_models,
             }
             render_page[page_name](body)
         self.discord_presence.set_page(page_name)
@@ -384,6 +392,8 @@ class FlowApp(ctk.CTk):
     def _on_close(self):
         if self._nav_highlight_job is not None:
             self.after_cancel(self._nav_highlight_job)
+        if self.models_frame is not None:
+            self.models_frame.stop()
         self.discord_presence.close()
         self.destroy()
 
@@ -484,37 +494,6 @@ class FlowApp(ctk.CTk):
             text_color=self.MUTED,
             font=ctk.CTkFont(size=14),
         ).grid(row=3, column=0, columnspan=3, pady=(0, 28))
-
-    def _render_models(self, body):
-        body.grid_columnconfigure(1, weight=1)
-        self._feature_card(
-            body, 0, "⌕", "Каталог Civitai",
-            "Поиск и просмотр моделей появятся здесь."
-        )
-        self._feature_card(
-            body, 1, "↓", "Загрузки",
-            "Здесь будет отображаться очередь скачивания моделей."
-        )
-
-    def _feature_card(self, parent, column, symbol, title, description):
-        card = self._card(parent)
-        card.grid(
-            row=0, column=column,
-            padx=(0, 8) if column == 0 else (8, 0),
-            sticky="nsew"
-        )
-        ctk.CTkLabel(
-            card, text=symbol, text_color=self.ACCENT, font=ctk.CTkFont(size=42)
-        ).pack(anchor="w", padx=26, pady=(28, 18))
-        ctk.CTkLabel(
-            card, text=title, text_color=self.TEXT,
-            font=ctk.CTkFont(size=19, weight="bold")
-        ).pack(anchor="w", padx=26)
-        ctk.CTkLabel(
-            card, text=description, text_color=self.MUTED,
-            font=ctk.CTkFont(size=14), justify="left", wraplength=250
-        ).pack(anchor="w", padx=26, pady=(10, 26))
-
 
 if __name__ == "__main__":
     FlowApp().mainloop()
