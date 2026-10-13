@@ -5,7 +5,10 @@ import threading
 
 import customtkinter as ctk
 
-from civitai import CivitaiClient, CivitaiError, DownloadCancelled, ModelFile, models_directory
+from civitai import (
+    CivitaiClient, CivitaiError, DownloadCancelled, ModelFile,
+    model_images, models_directory,
+)
 
 
 class ModelsFrame(ctk.CTkFrame):
@@ -18,7 +21,17 @@ class ModelsFrame(ctk.CTkFrame):
         self.busy = None
         self.file_options = {}
         self.poll_job = None
+        self.search_job = None
+        self.search_generation = 0
+        self.image_tasks = Queue()
+        self.image_targets = {}
+        self.thumbnail_refs = {}
+        self.viewer = None
+        self.viewer_generation = 0
+        self.stopping = threading.Event()
         self.indeterminate = False
+        for _ in range(4):
+            threading.Thread(target=self._image_worker, daemon=True).start()
 
         self.grid_columnconfigure(0, weight=1)
 
@@ -43,6 +56,7 @@ class ModelsFrame(ctk.CTkFrame):
         )
         self.query_entry.grid(row=1, column=0, padx=(20, 8), pady=(0, 16), sticky="ew")
         self.query_entry.bind("<Return>", lambda _event: self._start_search())
+        self.query_entry.bind("<KeyRelease>", self._schedule_search)
         self.search_button = ctk.CTkButton(
             search_card, text="Найти", width=100, height=38, corner_radius=9,
             fg_color=app.ACCENT, hover_color=app.ACCENT_HOVER,
@@ -55,7 +69,7 @@ class ModelsFrame(ctk.CTkFrame):
         results_card.grid_columnconfigure(0, weight=1)
         results_card.grid_rowconfigure(1, weight=1)
         ctk.CTkLabel(
-            results_card, text="Результаты поиска", text_color=app.TEXT,
+            results_card, text="Лента моделей", text_color=app.TEXT,
             font=ctk.CTkFont(size=17, weight="bold"),
         ).grid(row=0, column=0, padx=20, pady=(14, 4), sticky="w")
         self.results_list = ctk.CTkScrollableFrame(
@@ -63,7 +77,7 @@ class ModelsFrame(ctk.CTkFrame):
         )
         self.results_list.grid(row=1, column=0, padx=14, pady=(0, 12), sticky="nsew")
         self.results_list.grid_columnconfigure(0, weight=1)
-        self._show_results_message("Введите название модели или её ID.")
+        self._show_results_message("Загружаем модели Civitai…")
 
         download_card = self._card()
         download_card.grid(row=4, column=0, pady=(12, 0), sticky="ew")
@@ -109,6 +123,7 @@ class ModelsFrame(ctk.CTkFrame):
 
         self.grid_rowconfigure(3, weight=1)
         self.poll_job = self.after(100, self._poll_events)
+        self._start_search()
 
     def _card(self):
         return ctk.CTkFrame(
@@ -125,6 +140,9 @@ class ModelsFrame(ctk.CTkFrame):
 
     def _set_busy(self, operation=None):
         self.busy = operation
+        self.query_entry.configure(
+            state="disabled" if operation == "download" else "normal"
+        )
         self.search_button.configure(state="disabled" if operation else "normal")
         self.download_button.configure(
             state="normal" if not operation and self.file_options else "disabled"
@@ -133,29 +151,43 @@ class ModelsFrame(ctk.CTkFrame):
             state="normal" if operation == "download" else "disabled"
         )
 
-    def _start_search(self):
-        query = self.query_entry.get().strip()
-        if self.busy or not query:
-            if not query:
-                self.status_label.configure(text="Введите название модели или числовой ID.")
+    def _schedule_search(self, event):
+        if event.keysym in ("Return", "Up", "Down", "Left", "Right"):
             return
+        if self.search_job is not None:
+            self.after_cancel(self.search_job)
+        self.search_job = self.after(500, self._start_search)
+
+    def _start_search(self):
+        if self.search_job is not None:
+            self.after_cancel(self.search_job)
+            self.search_job = None
+        query = self.query_entry.get().strip()
+        if self.busy == "download":
+            return
+        self.search_generation += 1
+        generation = self.search_generation
+        self.image_targets.clear()
+        self.thumbnail_refs.clear()
         self.file_options = {}
         self.file_menu.configure(values=["Нет выбранного файла"], state="disabled")
         self.file_menu.set("Нет выбранного файла")
         self.selected_label.configure(text="Сначала выберите модель из результатов.")
         self._set_busy("search")
-        self._show_results_message("Ищем модели на Civitai…")
-        self.status_label.configure(text="Поиск моделей…")
-        threading.Thread(target=self._search_worker, args=(query,), daemon=True).start()
+        self._show_results_message("Ищем модели на Civitai…" if query else "Загружаем ленту…")
+        self.status_label.configure(text="Поиск моделей…" if query else "Загрузка ленты…")
+        threading.Thread(
+            target=self._search_worker, args=(query, generation), daemon=True
+        ).start()
 
-    def _search_worker(self, query):
+    def _search_worker(self, query, generation):
         try:
             models = self.client.search_models(query)
-            self.events.put(("search_results", models))
+            self.events.put(("search_results", generation, models))
         except CivitaiError as exc:
-            self.events.put(("search_error", str(exc)))
+            self.events.put(("search_error", generation, str(exc)))
         except Exception:
-            self.events.put(("search_error", "Не удалось выполнить поиск моделей."))
+            self.events.put(("search_error", generation, "Не удалось выполнить поиск моделей."))
 
     def _show_models(self, models):
         if not models:
@@ -165,16 +197,175 @@ class ModelsFrame(ctk.CTkFrame):
         for widget in self.results_list.winfo_children():
             widget.destroy()
         for row, model in enumerate(models):
-            name = model.get("name", "Без названия")
+            name = str(model.get("name") or "Без названия")
             kind = model.get("type", "Модель")
             model_id = model.get("id", "?")
+            card = ctk.CTkFrame(
+                self.results_list, corner_radius=12, fg_color=self.app.HOVER,
+            )
+            card.grid(row=row, column=0, padx=6, pady=7, sticky="ew")
+            card.grid_columnconfigure(0, weight=1)
             ctk.CTkButton(
-                self.results_list, text=f"{name}  ·  {kind}  ·  ID {model_id}",
-                anchor="w", height=36, corner_radius=8,
-                fg_color="transparent", hover_color=self.app.HOVER,
+                card, text=f"{name[:65]}  ·  {kind}  ·  ID {model_id}",
+                anchor="w", height=38, corner_radius=8,
+                fg_color="transparent", hover_color=self.app.CARD,
                 command=lambda selected=model: self._select_model(selected),
-            ).grid(row=row, column=0, padx=6, pady=3, sticky="ew")
-        self.status_label.configure(text=f"Найдено моделей: {len(models)}. Выберите модель.")
+            ).grid(row=0, column=0, padx=(10, 6), pady=(7, 3), sticky="ew")
+            ctk.CTkButton(
+                card, text="Скачать", width=98, height=32, corner_radius=8,
+                fg_color=self.app.ACCENT, hover_color=self.app.ACCENT_HOVER,
+                command=lambda selected=model: self._download_model(selected),
+            ).grid(row=0, column=1, padx=(0, 12), pady=(7, 3))
+
+            images = model_images(model)
+            if images:
+                gallery = ctk.CTkScrollableFrame(
+                    card, orientation="horizontal", height=112,
+                    fg_color="transparent",
+                )
+                gallery.grid(row=1, column=0, columnspan=2, padx=8, sticky="ew")
+                more_button = ctk.CTkButton(
+                    card, text="", height=26, width=120, anchor="w",
+                    fg_color="transparent", hover_color=self.app.CARD,
+                    text_color=self.app.MUTED,
+                )
+                more_button.grid(row=2, column=0, columnspan=2, padx=16, pady=(0, 6), sticky="w")
+                state = {
+                    "gallery": gallery, "more": more_button,
+                    "model": model, "images": images, "shown": 0,
+                }
+                more_button.configure(command=lambda current=state: self._add_image_batch(current))
+                self._add_image_batch(state)
+            else:
+                ctk.CTkLabel(
+                    card, text="Примеров изображений нет", text_color=self.app.MUTED,
+                ).grid(row=1, column=0, columnspan=2, padx=18, pady=(6, 14), sticky="w")
+        self.status_label.configure(text=f"Моделей в ленте: {len(models)}. Нажмите на модель или изображение.")
+
+    def _add_image_batch(self, state):
+        images = state["images"]
+        start = state["shown"]
+        for index in range(start, min(start + 6, len(images))):
+            button = ctk.CTkButton(
+                state["gallery"], text="Загрузка…", width=150, height=104,
+                corner_radius=8, fg_color=self.app.CARD,
+                hover_color=self.app.ACCENT_HOVER, text_color=self.app.MUTED,
+                command=lambda current=state, number=index: self._open_viewer(current, number),
+            )
+            button.grid(row=0, column=index, padx=4, pady=2)
+            image_id = id(button)
+            self.image_targets[image_id] = button
+            self.image_tasks.put((self.search_generation, image_id, images[index]))
+        state["shown"] = min(start + 6, len(images))
+        remaining = len(images) - state["shown"]
+        if remaining:
+            state["more"].configure(text=f"Ещё изображения ({remaining})")
+        else:
+            state["more"].grid_remove()
+
+    def _image_worker(self):
+        while not self.stopping.is_set():
+            try:
+                generation, image_id, url = self.image_tasks.get(timeout=0.2)
+            except Empty:
+                continue
+            if generation != self.search_generation:
+                continue
+            try:
+                picture = self.client.load_image(url, (150, 100))
+                self.events.put(("thumbnail", generation, image_id, picture))
+            except Exception:
+                self.events.put(("thumbnail_error", generation, image_id))
+
+    def _open_viewer(self, state, index):
+        self._close_viewer()
+        window = ctk.CTkToplevel(self, fg_color=self.app.BACKGROUND)
+        window.title(f"Flow · {state['model'].get('name', 'Пример')}")
+        window.geometry("980x740")
+        window.minsize(700, 520)
+        window.grid_columnconfigure(0, weight=1)
+        window.grid_rowconfigure(1, weight=1)
+        window.protocol("WM_DELETE_WINDOW", self._close_viewer)
+
+        ctk.CTkLabel(
+            window, text=str(state["model"].get("name") or "Модель")[:100],
+            text_color=self.app.TEXT, font=ctk.CTkFont(size=20, weight="bold"),
+        ).grid(row=0, column=0, padx=24, pady=(18, 6), sticky="w")
+        image_label = ctk.CTkLabel(
+            window, text="Загружаем изображение…", text_color=self.app.MUTED,
+        )
+        image_label.grid(row=1, column=0, padx=20, pady=8)
+
+        controls = ctk.CTkFrame(window, fg_color="transparent")
+        controls.grid(row=2, column=0, padx=20, pady=(6, 20))
+        ctk.CTkButton(
+            controls, text="←", width=52, command=lambda: self._move_viewer(-1),
+        ).grid(row=0, column=0, padx=8)
+        counter = ctk.CTkLabel(controls, text="", width=95, text_color=self.app.TEXT)
+        counter.grid(row=0, column=1, padx=8)
+        ctk.CTkButton(
+            controls, text="→", width=52, command=lambda: self._move_viewer(1),
+        ).grid(row=0, column=2, padx=8)
+        ctk.CTkButton(
+            controls, text="Скачать модель", width=150,
+            fg_color=self.app.ACCENT, hover_color=self.app.ACCENT_HOVER,
+            command=lambda model=state["model"]: self._download_from_viewer(model),
+        ).grid(row=0, column=3, padx=(24, 8))
+
+        self.viewer = {
+            "window": window, "label": image_label, "counter": counter,
+            "model": state["model"], "images": state["images"],
+            "index": index, "photo": None,
+        }
+        self._request_viewer_image()
+        window.lift()
+        window.focus()
+
+    def _move_viewer(self, offset):
+        if self.viewer is None:
+            return
+        count = len(self.viewer["images"])
+        self.viewer["index"] = (self.viewer["index"] + offset) % count
+        self._request_viewer_image()
+
+    def _request_viewer_image(self):
+        self.viewer_generation += 1
+        generation = self.viewer_generation
+        index = self.viewer["index"]
+        self.viewer["counter"].configure(text=f"{index + 1} / {len(self.viewer['images'])}")
+        self.viewer["label"].configure(image=None, text="Загружаем изображение…")
+        self.viewer["photo"] = None
+        url = self.viewer["images"][index]
+        threading.Thread(
+            target=self._viewer_worker, args=(generation, url), daemon=True
+        ).start()
+
+    def _viewer_worker(self, generation, url):
+        try:
+            picture = self.client.load_image(url, (900, 590))
+            self.events.put(("viewer_image", generation, picture))
+        except Exception:
+            self.events.put(("viewer_error", generation))
+
+    def _close_viewer(self):
+        self.viewer_generation += 1
+        if self.viewer is not None:
+            self.viewer["window"].destroy()
+            self.viewer = None
+
+    def _download_model(self, model):
+        if self.busy:
+            return
+        self._select_model(model)
+        if self.file_options:
+            self._start_download()
+
+    def _download_from_viewer(self, model):
+        if self.busy:
+            return
+        self._download_model(model)
+        if self.busy == "download":
+            self._close_viewer()
 
     def _select_model(self, model):
         self.selected_label.configure(
@@ -254,23 +445,51 @@ class ModelsFrame(ctk.CTkFrame):
 
     def _poll_events(self):
         self.poll_job = None
-        try:
-            while True:
+        for _ in range(24):
+            try:
                 event = self.events.get_nowait()
-                kind = event[0]
-                if kind == "search_results":
+            except Empty:
+                break
+            kind = event[0]
+            if kind == "search_results":
+                if event[1] == self.search_generation:
                     self._set_busy()
-                    self._show_models(event[1])
-                elif kind == "search_error":
+                    self._show_models(event[2])
+            elif kind == "search_error":
+                if event[1] == self.search_generation:
                     self._set_busy()
-                    self._show_results_message(event[1])
-                    self.status_label.configure(text=event[1])
-                elif kind == "progress":
-                    self._show_progress(*event[1:])
-                elif kind in ("download_done", "download_error", "download_cancelled"):
-                    self._finish_download(kind, event[1] if len(event) > 1 else None)
-        except Empty:
-            pass
+                    self._show_results_message(event[2])
+                    self.status_label.configure(text=event[2])
+            elif kind == "thumbnail":
+                if event[1] == self.search_generation:
+                    button = self.image_targets.get(event[2])
+                    if button is not None and button.winfo_exists():
+                        picture = event[3]
+                        photo = ctk.CTkImage(
+                            light_image=picture, dark_image=picture, size=picture.size,
+                        )
+                        self.thumbnail_refs[event[2]] = photo
+                        button.configure(image=photo, text="")
+            elif kind == "thumbnail_error":
+                if event[1] == self.search_generation:
+                    button = self.image_targets.get(event[2])
+                    if button is not None and button.winfo_exists():
+                        button.configure(text="Нет превью")
+            elif kind == "viewer_image":
+                if self.viewer is not None and event[1] == self.viewer_generation:
+                    picture = event[2]
+                    photo = ctk.CTkImage(
+                        light_image=picture, dark_image=picture, size=picture.size,
+                    )
+                    self.viewer["photo"] = photo
+                    self.viewer["label"].configure(image=photo, text="")
+            elif kind == "viewer_error":
+                if self.viewer is not None and event[1] == self.viewer_generation:
+                    self.viewer["label"].configure(text="Не удалось загрузить изображение.")
+            elif kind == "progress":
+                self._show_progress(*event[1:])
+            elif kind in ("download_done", "download_error", "download_cancelled"):
+                self._finish_download(kind, event[1] if len(event) > 1 else None)
         self.poll_job = self.after(100, self._poll_events)
 
     def _show_progress(self, downloaded, total, speed):
@@ -309,7 +528,12 @@ class ModelsFrame(ctk.CTkFrame):
         self._set_busy()
 
     def stop(self):
+        self.stopping.set()
         self.cancel_event.set()
+        if self.search_job is not None:
+            self.after_cancel(self.search_job)
+            self.search_job = None
         if self.poll_job is not None:
             self.after_cancel(self.poll_job)
             self.poll_job = None
+        self._close_viewer()
