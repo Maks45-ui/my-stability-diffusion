@@ -13,7 +13,8 @@ import requests
 from PIL import Image
 
 
-API_URL = "https://civitai.com/api/v1/models"
+API_ORIGIN = "https://civitai.red"
+API_URL = f"{API_ORIGIN}/api/v1/models"
 DEFAULT_API_KEY = "9b3da4cabd83c429ff171d87034e1fd4"
 CHUNK_SIZE = 256 * 1024
 MAX_IMAGE_BYTES = 32 * 1024 * 1024
@@ -57,6 +58,18 @@ def sized_image_url(url, width):
     return re.sub(r"/width=\d+", f"/width={width}", url, count=1)
 
 
+def red_download_url(url):
+    """Использовать домен с полным каталогом для URL файлов из ответа API."""
+    parsed = urlparse(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname not in ("civitai.com", "civitai.red")
+        or not parsed.path.startswith("/api/download/models/")
+    ):
+        raise CivitaiError("Недопустимая ссылка для скачивания модели.")
+    return parsed._replace(netloc="civitai.red").geturl()
+
+
 class CivitaiClient:
     def __init__(self, api_key=DEFAULT_API_KEY):
         self.headers = {
@@ -80,7 +93,7 @@ class CivitaiClient:
     def search_models(self, query):
         query = query.strip()
         is_id = query.isascii() and query.isdecimal()
-        params = {"limit": 8}
+        params = {"limit": 8, "nsfw": "true"}
         if is_id:
             params["ids"] = query
         elif query:
@@ -108,8 +121,8 @@ class CivitaiClient:
         """Получить и уменьшить пример вне потока Tkinter, не раскрывая API-ключ CDN."""
         parsed = urlparse(url)
         if parsed.scheme != "https" or not (
-            parsed.hostname == "civitai.com"
-            or (parsed.hostname or "").endswith(".civitai.com")
+            parsed.hostname in ("civitai.com", "civitai.red")
+            or (parsed.hostname or "").endswith((".civitai.com", ".civitai.red"))
         ):
             raise CivitaiError("Недопустимая ссылка на изображение.")
 
@@ -138,9 +151,7 @@ class CivitaiClient:
             raise CivitaiError("Не удалось открыть изображение.") from exc
 
     def download_file(self, model_file, progress, cancel_event):
-        url = urlparse(model_file.download_url)
-        if url.scheme != "https" or url.hostname != "civitai.com":
-            raise CivitaiError("Недопустимая ссылка для скачивания модели.")
+        download_url = red_download_url(model_file.download_url)
 
         folders = {
             "Checkpoint": "checkpoints",
@@ -158,7 +169,7 @@ class CivitaiClient:
         temporary_path = None
         try:
             with requests.get(
-                model_file.download_url,
+                download_url,
                 headers=self.headers,
                 stream=True,
                 timeout=(10, 60),
