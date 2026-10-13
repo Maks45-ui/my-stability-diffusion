@@ -1,6 +1,7 @@
 """Поиск моделей и потоковая загрузка файлов Civitai."""
 
 from dataclasses import dataclass
+from io import BytesIO
 import os
 from pathlib import Path
 import re
@@ -9,11 +10,13 @@ import time
 from urllib.parse import urlparse
 
 import requests
+from PIL import Image
 
 
 API_URL = "https://civitai.com/api/v1/models"
 DEFAULT_API_KEY = "9b3da4cabd83c429ff171d87034e1fd4"
 CHUNK_SIZE = 256 * 1024
+MAX_IMAGE_BYTES = 32 * 1024 * 1024
 
 
 class CivitaiError(Exception):
@@ -34,6 +37,24 @@ class ModelFile:
 
 def models_directory():
     return Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "Flow" / "models"
+
+
+def model_images(model):
+    """Все уникальные примеры из modelVersions[].images ответа API."""
+    images = []
+    seen = set()
+    for version in model.get("modelVersions") or []:
+        for image in version.get("images") or []:
+            url = image.get("url") if isinstance(image, dict) else None
+            if not url or url in seen or image.get("type") == "video":
+                continue
+            seen.add(url)
+            images.append(url)
+    return images
+
+
+def sized_image_url(url, width):
+    return re.sub(r"/width=\d+", f"/width={width}", url, count=1)
 
 
 class CivitaiClient:
@@ -58,17 +79,18 @@ class CivitaiClient:
 
     def search_models(self, query):
         query = query.strip()
-        if not query:
-            return []
-
-        url = f"{API_URL}/{query}" if query.isdecimal() else API_URL
-        params = None if query.isdecimal() else {"query": query, "limit": 10}
+        is_id = query.isascii() and query.isdecimal()
+        params = {"limit": 8}
+        if is_id:
+            params["ids"] = query
+        elif query:
+            params["query"] = query
+        else:
+            params["sort"] = "Most Downloaded"
         try:
             response = requests.get(
-                url, params=params, headers=self.headers, timeout=(10, 30)
+                API_URL, params=params, headers=self.headers, timeout=(10, 30)
             )
-            if query.isdecimal() and response.status_code == 404:
-                return []
             self._check_response(response)
             data = response.json()
         except requests.RequestException as exc:
@@ -76,10 +98,44 @@ class CivitaiClient:
         except ValueError as exc:
             raise CivitaiError("Civitai вернул некорректный ответ.") from exc
 
-        models = [data] if query.isdecimal() else data.get("items", [])
+        models = data.get("items", []) if isinstance(data, dict) else None
         if not isinstance(models, list):
             raise CivitaiError("Civitai вернул некорректный список моделей.")
         return models
+
+    @staticmethod
+    def load_image(url, max_size):
+        """Получить и уменьшить пример вне потока Tkinter, не раскрывая API-ключ CDN."""
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or not (
+            parsed.hostname == "civitai.com"
+            or (parsed.hostname or "").endswith(".civitai.com")
+        ):
+            raise CivitaiError("Недопустимая ссылка на изображение.")
+
+        image_url = sized_image_url(url, max_size[0])
+        try:
+            with requests.get(
+                image_url, headers={"User-Agent": "Flow/1.0"},
+                timeout=(8, 20), stream=True,
+            ) as response:
+                CivitaiClient._check_response(response)
+                if not response.headers.get("Content-Type", "").lower().startswith("image/"):
+                    raise CivitaiError("Сервер вернул не изображение.")
+                data = BytesIO()
+                for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
+                    data.write(chunk)
+                    if data.tell() > MAX_IMAGE_BYTES:
+                        raise CivitaiError("Изображение слишком большое.")
+            data.seek(0)
+            with Image.open(data) as source:
+                picture = source.convert("RGB")
+            picture.thumbnail(max_size, Image.Resampling.LANCZOS)
+            return picture
+        except requests.RequestException as exc:
+            raise CivitaiError("Не удалось загрузить изображение.") from exc
+        except (OSError, ValueError) as exc:
+            raise CivitaiError("Не удалось открыть изображение.") from exc
 
     def download_file(self, model_file, progress, cancel_event):
         url = urlparse(model_file.download_url)
