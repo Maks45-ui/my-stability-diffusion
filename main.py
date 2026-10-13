@@ -12,6 +12,67 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 
+class SettingsFrame(ctk.CTkFrame):
+    def __init__(self, master, app):
+        super().__init__(master, fg_color="transparent")
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(2, weight=1)
+
+        ctk.CTkLabel(
+            self,
+            text="Настройки",
+            text_color=app.TEXT,
+            font=ctk.CTkFont(size=30, weight="bold"),
+        ).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(
+            self,
+            text="Основные параметры Flow.",
+            text_color=app.MUTED,
+            font=ctk.CTkFont(size=15),
+        ).grid(row=1, column=0, pady=(4, 22), sticky="w")
+
+        card = ctk.CTkFrame(
+            self,
+            corner_radius=18,
+            fg_color=app.CARD,
+            border_width=1,
+            border_color=app.BORDER,
+        )
+        card.grid(row=2, column=0, sticky="nsew")
+        card.grid_columnconfigure(0, weight=1)
+        card.grid_rowconfigure(4, weight=1)
+
+        ctk.CTkLabel(
+            card,
+            text="Основные параметры",
+            text_color=app.TEXT,
+            font=ctk.CTkFont(size=20, weight="bold"),
+        ).grid(row=0, column=0, padx=28, pady=(24, 22), sticky="w")
+
+        settings = (
+            ("Тема интерфейса", "Тёмная"),
+            ("Язык", "Русский"),
+            ("Установка пакетов", "Скоро"),
+        )
+        for row, (title, value) in enumerate(settings, start=1):
+            option = ctk.CTkFrame(card, corner_radius=10, fg_color=app.HOVER)
+            option.grid(row=row, column=0, padx=28, pady=(0, 8), sticky="ew")
+            option.grid_columnconfigure(0, weight=1)
+            ctk.CTkLabel(
+                option, text=title, text_color=app.TEXT, font=ctk.CTkFont(size=14)
+            ).grid(row=0, column=0, padx=18, pady=14, sticky="w")
+            ctk.CTkLabel(
+                option, text=value, text_color=app.MUTED, font=ctk.CTkFont(size=14)
+            ).grid(row=0, column=1, padx=18, pady=14, sticky="e")
+
+        ctk.CTkLabel(
+            card,
+            text="Изменение параметров появится позже.",
+            text_color=app.MUTED,
+            font=ctk.CTkFont(size=13),
+        ).grid(row=5, column=0, padx=28, pady=(20, 28), sticky="w")
+
+
 class FlowApp(ctk.CTk):
     BACKGROUND = "#1E1E1E"
     SIDEBAR = "#252526"
@@ -35,7 +96,6 @@ class FlowApp(ctk.CTk):
         "Главная": "Управляйте пакетами и инструментами в одном месте.",
         "Галерея": "Здесь будут собраны ваши сгенерированные изображения.",
         "Загрузка моделей": "Каталог и загрузки моделей с Civitai.",
-        "Настройки": "Параметры приложения Flow.",
     }
 
     def __init__(self):
@@ -230,31 +290,35 @@ class FlowApp(ctk.CTk):
         for widget in self.page_container.winfo_children():
             widget.destroy()
 
-        ctk.CTkLabel(
-            self.page_container,
-            text=page_name,
-            text_color=self.TEXT,
-            font=ctk.CTkFont(size=30, weight="bold"),
-        ).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(
-            self.page_container,
-            text=self.SUBTITLES[page_name],
-            text_color=self.MUTED,
-            font=ctk.CTkFont(size=15),
-        ).grid(row=1, column=0, pady=(4, 22), sticky="w")
+        if page_name == "Настройки":
+            SettingsFrame(self.page_container, self).grid(
+                row=0, column=0, rowspan=3, sticky="nsew"
+            )
+        else:
+            ctk.CTkLabel(
+                self.page_container,
+                text=page_name,
+                text_color=self.TEXT,
+                font=ctk.CTkFont(size=30, weight="bold"),
+            ).grid(row=0, column=0, sticky="w")
+            ctk.CTkLabel(
+                self.page_container,
+                text=self.SUBTITLES[page_name],
+                text_color=self.MUTED,
+                font=ctk.CTkFont(size=15),
+            ).grid(row=1, column=0, pady=(4, 22), sticky="w")
 
-        body = ctk.CTkFrame(self.page_container, fg_color="transparent")
-        body.grid(row=2, column=0, sticky="nsew")
-        body.grid_columnconfigure(0, weight=1)
-        body.grid_rowconfigure(0, weight=1)
+            body = ctk.CTkFrame(self.page_container, fg_color="transparent")
+            body.grid(row=2, column=0, sticky="nsew")
+            body.grid_columnconfigure(0, weight=1)
+            body.grid_rowconfigure(0, weight=1)
 
-        render_page = {
-            "Главная": self._render_home,
-            "Галерея": self._render_gallery,
-            "Загрузка моделей": self._render_models,
-            "Настройки": self._render_settings,
-        }
-        render_page[page_name](body)
+            render_page = {
+                "Главная": self._render_home,
+                "Галерея": self._render_gallery,
+                "Загрузка моделей": self._render_models,
+            }
+            render_page[page_name](body)
         self.discord_presence.set_page(page_name)
 
     def _on_close(self):
@@ -388,22 +452,6 @@ class FlowApp(ctk.CTk):
             card, text=description, text_color=self.MUTED,
             font=ctk.CTkFont(size=14), justify="left", wraplength=250
         ).pack(anchor="w", padx=26, pady=(10, 26))
-
-    def _render_settings(self, body):
-        card = self._card(body)
-        card.grid(row=0, column=0, sticky="nsew")
-        ctk.CTkLabel(
-            card,
-            text="Настройки Flow",
-            text_color=self.TEXT,
-            font=ctk.CTkFont(size=20, weight="bold"),
-        ).pack(anchor="w", padx=28, pady=(26, 10))
-        ctk.CTkLabel(
-            card,
-            text="Параметры приложения будут доступны здесь.",
-            text_color=self.MUTED,
-            font=ctk.CTkFont(size=14),
-        ).pack(anchor="w", padx=28)
 
 
 if __name__ == "__main__":
