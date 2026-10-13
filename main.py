@@ -23,10 +23,8 @@ class FlowApp(ctk.CTk):
     TEXT = "#F5F6F8"
     MUTED = "#A9ADB5"
 
-    EXPANDED_WIDTH = 242
-    COLLAPSED_WIDTH = 72
-    SIDEBAR_FRAME_MS = 10
-    SIDEBAR_STEP = 12
+    EXPANDED_WIDTH = 220
+    COLLAPSED_WIDTH = 70
     NAV_ITEMS = (
         ("Главная", "⌂"),
         ("Галерея", "▦"),
@@ -55,7 +53,6 @@ class FlowApp(ctk.CTk):
         self._load_logo()
 
         self.sidebar_expanded = True
-        self.is_animating = False
         self.active_page = "Главная"
         self.nav_buttons = {}
         self.discord_presence = DiscordPresence()
@@ -117,7 +114,7 @@ class FlowApp(ctk.CTk):
     def _add_nav_button(self, name, symbol, row):
         item = ctk.CTkFrame(
             self.sidebar,
-            width=48,
+            width=46,
             height=44,
             corner_radius=10,
             fg_color=self.SIDEBAR,
@@ -129,7 +126,7 @@ class FlowApp(ctk.CTk):
         icon_button = ctk.CTkButton(
             item,
             text=symbol,
-            width=48,
+            width=46,
             height=44,
             corner_radius=10,
             fg_color="transparent",
@@ -202,40 +199,15 @@ class FlowApp(ctk.CTk):
         self.page_container.grid_rowconfigure(2, weight=1)
 
     def toggle_sidebar(self):
-        if self.is_animating:
-            return
-
-        self.is_animating = True
-        self._sidebar_target_expanded = not self.sidebar_expanded
-        self._sidebar_target_width = (
-            self.EXPANDED_WIDTH
-            if self._sidebar_target_expanded
-            else self.COLLAPSED_WIDTH
-        )
-        for _, _, label_button in self.nav_buttons.values():
-            label_button.grid_remove()
-        self.after(self.SIDEBAR_FRAME_MS, self._animate_sidebar)
-
-    def _animate_sidebar(self):
-        current_width = int(self.sidebar.cget("width"))
-        remaining = self._sidebar_target_width - current_width
-        if remaining == 0:
-            self._finish_sidebar_animation()
-            return
-
-        step = min(self.SIDEBAR_STEP, abs(remaining))
-        self.sidebar.configure(width=current_width + (step if remaining > 0 else -step))
-        if step == abs(remaining):
-            self._finish_sidebar_animation()
-        else:
-            self.after(self.SIDEBAR_FRAME_MS, self._animate_sidebar)
-
-    def _finish_sidebar_animation(self):
-        self.sidebar_expanded = self._sidebar_target_expanded
+        self.sidebar_expanded = not self.sidebar_expanded
         if self.sidebar_expanded:
+            self.sidebar.configure(width=self.EXPANDED_WIDTH)
             for _, _, label_button in self.nav_buttons.values():
                 label_button.grid()
-        self.is_animating = False
+        else:
+            for _, _, label_button in self.nav_buttons.values():
+                label_button.grid_remove()
+            self.sidebar.configure(width=self.COLLAPSED_WIDTH)
 
     def _refresh_navigation(self):
         for name, (item, icon_button, label_button) in self.nav_buttons.items():
