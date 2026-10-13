@@ -167,6 +167,19 @@ class FlowApp(ctk.CTk):
             try:
                 with Image.open(self.asset_root / "assets" / "icons" / filename) as source:
                     icon = source.convert("RGBA")
+                bounds = icon.getchannel("A").getbbox()
+                if bounds:
+                    icon = icon.crop(bounds)
+                    scale = 68 / max(icon.size)
+                    icon = icon.resize(
+                        (round(icon.width * scale), round(icon.height * scale)),
+                        Image.Resampling.LANCZOS,
+                    )
+                    canvas = Image.new("RGBA", (96, 96), (0, 0, 0, 0))
+                    canvas.alpha_composite(
+                        icon, ((96 - icon.width) // 2, (96 - icon.height) // 2),
+                    )
+                    icon = canvas
                 self.nav_icons[name] = ctk.CTkImage(
                     light_image=icon, dark_image=icon, size=(20, 20)
                 )
