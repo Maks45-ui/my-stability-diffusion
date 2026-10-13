@@ -26,10 +26,10 @@ class FlowApp(ctk.CTk):
     EXPANDED_WIDTH = 220
     COLLAPSED_WIDTH = 70
     NAV_ITEMS = (
-        ("Главная", "⌂"),
-        ("Галерея", "▦"),
-        ("Загрузка моделей", "↓"),
-        ("Настройки", "⚙"),
+        ("Главная", "home.png", "⌂"),
+        ("Галерея", "gallery.png", "▦"),
+        ("Загрузка моделей", "download.png", "↓"),
+        ("Настройки", "settings.png", "⚙"),
     )
     SUBTITLES = {
         "Главная": "Управляйте пакетами и инструментами в одном месте.",
@@ -48,9 +48,12 @@ class FlowApp(ctk.CTk):
         self.grid_columnconfigure(0, weight=0)
         self.grid_columnconfigure(1, weight=1)
 
+        self.asset_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
         self.logo_image = None
         self.window_icon = None
+        self.nav_icons = {}
         self._load_logo()
+        self._load_nav_icons()
 
         self.sidebar_expanded = True
         self.active_page = "Главная"
@@ -63,8 +66,10 @@ class FlowApp(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _load_logo(self):
-        base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-        for logo_path in (base_dir / "assets" / "logo.png", base_dir / "logo.png"):
+        for logo_path in (
+            self.asset_root / "assets" / "logo.png",
+            self.asset_root / "logo.png",
+        ):
             try:
                 with Image.open(logo_path) as source:
                     logo = source.convert("RGBA")
@@ -76,6 +81,17 @@ class FlowApp(ctk.CTk):
                 return
             except (OSError, ValueError, TclError):
                 continue
+
+    def _load_nav_icons(self):
+        for name, filename, _ in self.NAV_ITEMS:
+            try:
+                with Image.open(self.asset_root / "assets" / "icons" / filename) as source:
+                    icon = source.convert("RGBA")
+                self.nav_icons[name] = ctk.CTkImage(
+                    light_image=icon, dark_image=icon, size=(20, 20)
+                )
+            except (OSError, ValueError):
+                self.nav_icons[name] = None
 
     def _set_window_icon(self):
         if self.window_icon is not None:
@@ -106,49 +122,31 @@ class FlowApp(ctk.CTk):
             command=self.toggle_sidebar,
         ).grid(row=0, column=0, padx=13, pady=(22, 32), sticky="w")
 
-        for row, (name, symbol) in enumerate(self.NAV_ITEMS[:3], start=1):
-            self._add_nav_button(name, symbol, row)
-        name, symbol = self.NAV_ITEMS[3]
-        self._add_nav_button(name, symbol, 5)
+        for row, (name, _, fallback) in enumerate(self.NAV_ITEMS[:3], start=1):
+            self._add_nav_button(name, fallback, row)
+        name, _, fallback = self.NAV_ITEMS[3]
+        self._add_nav_button(name, fallback, 5)
 
-    def _add_nav_button(self, name, symbol, row):
-        item = ctk.CTkFrame(
+    def _add_nav_button(self, name, fallback, row):
+        icon = self.nav_icons[name]
+        button = ctk.CTkButton(
             self.sidebar,
             width=46,
             height=44,
             corner_radius=10,
-            fg_color=self.SIDEBAR,
-        )
-        item.grid(row=row, column=0, padx=12, pady=4, sticky="ew")
-        item.grid_propagate(False)
-        item.grid_columnconfigure(1, weight=1)
-
-        icon_button = ctk.CTkButton(
-            item,
-            text=symbol,
-            width=46,
-            height=44,
-            corner_radius=10,
-            fg_color="transparent",
-            text_color=self.TEXT,
-            font=ctk.CTkFont(size=18),
-            command=lambda page=name: self.show_page(page),
-        )
-        icon_button.grid(row=0, column=0)
-
-        label_button = ctk.CTkButton(
-            item,
-            text=name,
-            height=44,
-            corner_radius=10,
-            fg_color="transparent",
-            text_color=self.TEXT,
+            border_spacing=5,
+            text=name if icon is not None else f"{fallback}  {name}",
+            image=icon,
+            compound="left",
             anchor="w",
+            fg_color="transparent",
+            hover_color=self.HOVER,
+            text_color=self.TEXT,
             font=ctk.CTkFont(size=15),
             command=lambda page=name: self.show_page(page),
         )
-        label_button.grid(row=0, column=1, sticky="ew")
-        self.nav_buttons[name] = (item, icon_button, label_button)
+        button.grid(row=row, column=0, padx=12, pady=4, sticky="ew")
+        self.nav_buttons[name] = (button, fallback)
 
     def _build_main_area(self):
         main = ctk.CTkFrame(self, corner_radius=0, fg_color=self.BACKGROUND)
@@ -202,22 +200,29 @@ class FlowApp(ctk.CTk):
         self.sidebar_expanded = not self.sidebar_expanded
         if self.sidebar_expanded:
             self.sidebar.configure(width=self.EXPANDED_WIDTH)
-            for _, _, label_button in self.nav_buttons.values():
-                label_button.grid()
         else:
-            for _, _, label_button in self.nav_buttons.values():
-                label_button.grid_remove()
+            for button, fallback in self.nav_buttons.values():
+                button.configure(
+                    text="" if button.cget("image") is not None else fallback,
+                    anchor="center",
+                )
             self.sidebar.configure(width=self.COLLAPSED_WIDTH)
+            return
+
+        for name, (button, fallback) in self.nav_buttons.items():
+            button.configure(
+                text=name if button.cget("image") is not None else f"{fallback}  {name}",
+                anchor="w",
+            )
 
     def _refresh_navigation(self):
-        for name, (item, icon_button, label_button) in self.nav_buttons.items():
+        for name, (button, _) in self.nav_buttons.items():
             selected = name == self.active_page
-            item.configure(fg_color=self.ACCENT if selected else self.SIDEBAR)
-            for button in (icon_button, label_button):
-                button.configure(
-                    hover_color=self.ACCENT_HOVER if selected else self.HOVER,
-                    text_color=self.TEXT,
-                )
+            button.configure(
+                fg_color=self.ACCENT_HOVER if selected else "transparent",
+                hover_color=self.ACCENT if selected else self.HOVER,
+                text_color=self.TEXT,
+            )
 
     def show_page(self, page_name):
         self.active_page = page_name
