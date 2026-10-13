@@ -1,6 +1,5 @@
 node_modules/
 dist/
-release/
-packages/
+src-tauri/target/
+src-tauri/gen/schemas/
 *.log
-

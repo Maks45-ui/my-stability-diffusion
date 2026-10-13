@@ -1,4 +1,7 @@
-import type { AppState, ModelSummary, Page, TaskEvent } from "./types";
+import { flowApi } from "./bridge";
+import type { AppState, ModelSummary, Page, TaskEvent, Theme, ThemeState } from "./types";
+
+window.flow = flowApi;
 
 function element<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
@@ -22,9 +25,48 @@ let searchSequence = 0;
 let debounceTimer: number | undefined;
 let toastTimer: number | undefined;
 let installing = false;
+let installationDir = "";
+
+function savedTheme(): Theme {
+  try { return localStorage.getItem("flow.theme") === "light" ? "light" : "dark"; }
+  catch { return "dark"; }
+}
+
+const theme: ThemeState = { current: savedTheme() };
+
+function applyTheme(next: Theme): void {
+  theme.current = next;
+  document.documentElement.dataset.theme = next;
+  const light = next === "light";
+  const button = element<HTMLButtonElement>("theme-toggle");
+  button.setAttribute("aria-pressed", String(light));
+  button.setAttribute("aria-label", light ? "Включить тёмную тему" : "Включить светлую тему");
+  element<HTMLElement>("theme-toggle-icon").textContent = light ? "☾" : "☀";
+  element<HTMLElement>("theme-toggle-label").textContent = light ? "Тёмная тема" : "Светлая тема";
+  element<HTMLElement>("theme-state").textContent = light ? "Светлая" : "Тёмная";
+  try { localStorage.setItem("flow.theme", next); } catch { /* UI still works if storage is disabled. */ }
+}
+
+function showInstallationDir(path: string): void {
+  installationDir = path;
+  element<HTMLInputElement>("install-dir-settings").value = path;
+  element<HTMLInputElement>("install-dir-dialog").value = path;
+}
+
+async function browseInstallationDir(): Promise<void> {
+  try {
+    const selected = await window.flow.browseInstallationDirectory(installationDir);
+    if (selected === null) return;
+    // Persist the chosen parent folder before the installer starts.
+    await window.flow.saveInstallationDirectory(selected);
+    showInstallationDir(selected);
+    await refreshState();
+  } catch (error) { notify(message(error)); }
+}
 
 function message(error: unknown): string {
-  return error instanceof Error ? error.message : "Произошла неизвестная ошибка.";
+  if (error instanceof Error) return error.message;
+  return typeof error === "string" ? error : "Произошла неизвестная ошибка.";
 }
 
 function notify(value: string): void {
@@ -56,7 +98,7 @@ function showPage(page: Page): void {
     if (active) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
   });
   window.requestAnimationFrame(updateIndicator);
-  void window.flow.setPage(page);
+  void window.flow.setPage(page).catch(() => { /* Discord may be unavailable. */ });
   if (page === "models" && !hasLoadedCatalog) {
     hasLoadedCatalog = true;
     void searchModels();
@@ -70,6 +112,7 @@ function renderPackages(state: AppState): void {
   element<HTMLElement>("package-badge").textContent = `${count} ${count === 1 ? "пакет" : "пакетов"}`;
   element<HTMLElement>("models-path").textContent = state.modelsPath;
   element<HTMLElement>("token-state").textContent = state.hasCivitaiToken ? "Сохранён" : "Не задан";
+  showInstallationDir(state.installationDir);
   if (count === 0) {
     const empty = make("div", "empty-package");
     empty.append(make("div", "empty-package-icon", "◈"), make("h3", "", "Библиотека пока пуста"), make("p", "", "Добавьте первый пакет, чтобы начать работу."));
@@ -240,10 +283,11 @@ element<HTMLButtonElement>("add-package").addEventListener("click", () => instal
 element<HTMLButtonElement>("close-install").addEventListener("click", () => installDialog.close());
 element<HTMLButtonElement>("start-install").addEventListener("click", async () => {
   if (installing) return;
+  if (!installationDir) { notify("Сначала выберите папку установки."); return; }
   installing = true;
   log.textContent = "";
   element<HTMLButtonElement>("start-install").disabled = true;
-  try { await window.flow.installWebUI(); }
+  try { await window.flow.installWebUI(installationDir); }
   catch (error) { installing = false; element<HTMLButtonElement>("start-install").disabled = false; notify(message(error)); }
 });
 element<HTMLButtonElement>("cancel-install").addEventListener("click", async () => {
@@ -257,6 +301,9 @@ searchInput.addEventListener("input", () => {
 });
 searchInput.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); void searchModels(); } });
 element<HTMLButtonElement>("cancel-download").addEventListener("click", () => void window.flow.cancelDownload());
+element<HTMLButtonElement>("browse-install-settings").addEventListener("click", () => void browseInstallationDir());
+element<HTMLButtonElement>("browse-install-dialog").addEventListener("click", () => void browseInstallationDir());
+element<HTMLButtonElement>("theme-toggle").addEventListener("click", () => applyTheme(theme.current === "dark" ? "light" : "dark"));
 element<HTMLFormElement>("token-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = element<HTMLInputElement>("token-input");
@@ -264,7 +311,8 @@ element<HTMLFormElement>("token-form").addEventListener("submit", async (event) 
   catch (error) { notify(message(error)); }
 });
 window.addEventListener("resize", updateIndicator);
-window.flow.onTask(onTask);
+void window.flow.onTask(onTask).catch((error: unknown) => notify(message(error)));
+applyTheme(theme.current);
 void refreshState();
+void window.flow.setPage("home").catch(() => { /* Discord may be unavailable. */ });
 window.requestAnimationFrame(updateIndicator);
-

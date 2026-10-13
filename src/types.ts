@@ -12,6 +12,7 @@ export interface AppState {
   packages: PackageInfo[];
   hasCivitaiToken: boolean;
   modelsPath: string;
+  installationDir: string;
 }
 
 export interface ModelFile {
@@ -38,7 +39,9 @@ export interface TaskEvent {
 
 export interface FlowAPI {
   getState(): Promise<AppState>;
-  installWebUI(): Promise<void>;
+  installWebUI(installationDir: string): Promise<void>;
+  browseInstallationDirectory(currentPath: string): Promise<string | null>;
+  saveInstallationDirectory(directory: string): Promise<void>;
   cancelInstall(): Promise<void>;
   launchWebUI(): Promise<void>;
   openPackageSettings(): Promise<void>;
@@ -48,7 +51,13 @@ export interface FlowAPI {
   getPreview(url: string): Promise<string>;
   saveCivitaiToken(token: string): Promise<void>;
   setPage(page: Page): Promise<void>;
-  onTask(callback: (event: TaskEvent) => void): () => void;
+  onTask(callback: (event: TaskEvent) => void): Promise<() => void>;
+}
+
+export type Theme = "dark" | "light";
+
+export interface ThemeState {
+  current: Theme;
 }
 
 declare global {
@@ -56,4 +65,3 @@ declare global {
     flow: FlowAPI;
   }
 }
-

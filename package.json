@@ -1,30 +1,25 @@
 {
   "name": "flow-ai-manager",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "Flow desktop AI package manager",
+  "type": "module",
   "packageManager": "pnpm@11.25.0",
-  "main": "dist/main.js",
   "scripts": {
-    "postinstall": "node node_modules/electron/install.js",
+    "dev": "vite",
     "check": "tsc --noEmit",
-    "build": "pnpm run check && node scripts/build.mts",
-    "start": "pnpm run build && electron .",
-    "dist:win": "pnpm run build && electron-builder --win --dir"
+    "build": "pnpm run check && vite build",
+    "tauri": "tauri",
+    "start": "tauri dev",
+    "dist:win": "tauri build --bundles nsis"
   },
-  "engines": { "node": ">=24" },
+  "dependencies": {
+    "@tauri-apps/api": "2.12.3",
+    "@tauri-apps/plugin-dialog": "2.8.2"
+  },
   "devDependencies": {
+    "@tauri-apps/cli": "2.12.2",
     "@types/node": "^24.0.0",
-    "electron": "^44.7.0",
-    "electron-builder": "^26.15.3",
-    "typescript": "^5.9.3"
-  },
-  "build": {
-    "appId": "com.maks45ui.flow",
-    "productName": "Flow",
-    "files": ["dist/**/*", "package.json"],
-    "directories": { "output": "release" },
-    "win": { "icon": "assets/logo.ico" }
+    "typescript": "^5.9.3",
+    "vite": "8.3.4"
   }
 }
-

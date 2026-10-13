@@ -3,16 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'" />
   <title>Flow</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar" id="sidebar" aria-label="Навигация">
       <div class="sidebar-top">
         <button class="icon-button menu-toggle" id="menu-toggle" aria-label="Свернуть меню" title="Свернуть меню">☰</button>
-        <div class="sidebar-brand"><img src="assets/logo.png" alt="" /><span>Flow</span></div>
+        <div class="sidebar-brand"><img src="/assets/logo.png" alt="" /><span>Flow</span></div>
       </div>
       <nav class="navigation" id="navigation">
         <span class="nav-indicator" id="nav-indicator" aria-hidden="true"></span>
@@ -26,8 +25,8 @@
 
     <main class="main">
       <header class="topbar">
-        <div class="topbar-brand"><img src="assets/logo.png" alt="Логотип Flow" /><div><strong>Flow</strong><span>AI Manager</span></div></div>
-        <div class="topbar-actions"><span class="topbar-caption">Ваше пространство для творчества</span><span class="avatar">F</span></div>
+        <div class="topbar-brand"><img src="/assets/logo.png" alt="Логотип Flow" /><div><strong>Flow</strong><span>AI Manager</span></div></div>
+        <div class="topbar-actions"><span class="topbar-caption">Ваше пространство для творчества</span><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Переключить тему" aria-pressed="false"><span class="theme-toggle-icon" id="theme-toggle-icon" aria-hidden="true">☀</span><span id="theme-toggle-label">Светлая тема</span></button><span class="avatar">F</span></div>
       </header>
 
       <div class="content">
@@ -54,16 +53,15 @@
 
         <section class="page" id="page-settings" aria-labelledby="settings-title">
           <div class="page-heading"><div><span class="eyebrow">ПЕРСОНАЛИЗАЦИЯ</span><h1 id="settings-title">Настройки</h1><p>Основные параметры Flow и доступ к каталогу моделей.</p></div><span class="page-symbol">⚙</span></div>
-          <div class="panel settings-panel"><div class="setting-row"><div><h2>Оформление</h2><p>Тёмная тема Flow</p></div><span class="setting-value">Включена</span></div><div class="setting-row"><div><h2>Язык</h2><p>Язык интерфейса</p></div><span class="setting-value">Русский</span></div><div class="setting-row token-row"><div><h2>Ключ Civitai API</h2><p>Хранится только на этом устройстве. Нужен для закрытых моделей и загрузок.</p></div><span class="setting-value" id="token-state">Не задан</span></div><form id="token-form" class="token-form"><input type="password" id="token-input" placeholder="Вставьте API-ключ" autocomplete="off" aria-label="Ключ Civitai API" /><button type="submit" class="secondary-button">Сохранить ключ</button></form><div class="setting-row"><div><h2>Папка моделей</h2><p id="models-path">Загрузка…</p></div></div></div>
+          <div class="panel settings-panel"><div class="setting-row"><div><h2>Оформление</h2><p>Выбранная цветовая схема интерфейса.</p></div><span class="setting-value" id="theme-state">Тёмная</span></div><div class="setting-row"><div><h2>Язык</h2><p>Язык интерфейса</p></div><span class="setting-value">Русский</span></div><div class="setting-row installation-row"><div><h2>Папка установки Stable Diffusion</h2><p>Flow создаст в выбранной папке каталог sd-webui.</p></div></div><div class="path-control"><input id="install-dir-settings" type="text" readonly aria-label="Папка установки Stable Diffusion" placeholder="Загрузка пути…" /><button id="browse-install-settings" class="secondary-button" type="button">Обзор...</button></div><div class="setting-row token-row"><div><h2>Ключ Civitai API</h2><p>Хранится только на этом устройстве. Нужен для закрытых моделей и загрузок.</p></div><span class="setting-value" id="token-state">Не задан</span></div><form id="token-form" class="token-form"><input type="password" id="token-input" placeholder="Вставьте API-ключ" autocomplete="off" aria-label="Ключ Civitai API" /><button type="submit" class="secondary-button">Сохранить ключ</button></form><div class="setting-row"><div><h2>Папка моделей</h2><p id="models-path">Загрузка…</p></div></div></div>
         </section>
       </div>
       <div class="toast" id="toast" role="status" aria-live="polite"></div>
     </main>
   </div>
 
-  <dialog class="modal" id="install-dialog"><div class="modal-header"><div><span class="eyebrow">УСТАНОВКА ПАКЕТА</span><h2>AUTOMATIC1111 WebUI</h2></div><button class="icon-button" id="close-install" aria-label="Закрыть">×</button></div><p>Flow проверит Git и Python 3.10, загрузит WebUI и создаст отдельное окружение.</p><div class="install-step" id="install-step">Готово к установке</div><pre class="log-output" id="install-log" aria-live="polite"></pre><div class="modal-actions"><button class="secondary-button" id="cancel-install">Отменить</button><button class="primary-button" id="start-install">Начать установку</button></div></dialog>
+  <dialog class="modal" id="install-dialog"><div class="modal-header"><div><span class="eyebrow">УСТАНОВКА ПАКЕТА</span><h2>AUTOMATIC1111 WebUI</h2></div><button class="icon-button" id="close-install" aria-label="Закрыть">×</button></div><p>Flow проверит Git и Python 3.10, загрузит WebUI и создаст отдельное окружение.</p><div class="install-location"><label for="install-dir-dialog">Папка установки</label><div class="path-control"><input id="install-dir-dialog" type="text" readonly placeholder="Выберите папку" /><button id="browse-install-dialog" class="secondary-button" type="button">Обзор...</button></div><small>Пакет будет установлен в подпапку sd-webui.</small></div><div class="install-step" id="install-step">Готово к установке</div><pre class="log-output" id="install-log" aria-live="polite"></pre><div class="modal-actions"><button class="secondary-button" id="cancel-install">Отменить</button><button class="primary-button" id="start-install">Начать установку</button></div></dialog>
   <dialog class="modal image-modal" id="image-dialog"><button class="icon-button image-close" id="close-image" aria-label="Закрыть">×</button><img id="full-image" alt="Пример изображения модели" /></dialog>
-  <script src="renderer.js" type="module"></script>
+  <script src="/src/renderer.ts" type="module"></script>
 </body>
 </html>
-
