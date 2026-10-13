@@ -1,6 +1,5 @@
 from pathlib import Path
 import sys
-from time import perf_counter
 from tkinter import TclError
 
 import customtkinter as ctk
@@ -24,9 +23,8 @@ class FlowApp(ctk.CTk):
 
     EXPANDED_WIDTH = 242
     COLLAPSED_WIDTH = 72
-    SIDEBAR_ANIMATION_SECONDS = 0.16
-    SIDEBAR_FRAME_MS = 20
-    MAX_FRAME_GAP_SECONDS = 0.05
+    SIDEBAR_FRAME_MS = 10
+    SIDEBAR_STEP = 12
     NAV_ITEMS = (
         ("Главная", "⌂"),
         ("Галерея", "▦"),
@@ -56,8 +54,7 @@ class FlowApp(ctk.CTk):
 
         self.sidebar_expanded = True
         self.sidebar_labels_visible = True
-        self.sidebar_animation = None
-        self.sidebar_instant_mode = False
+        self.is_animating = False
         self.active_page = "Главная"
         self.nav_buttons = {}
 
@@ -174,59 +171,39 @@ class FlowApp(ctk.CTk):
         self.page_container.grid_rowconfigure(2, weight=1)
 
     def toggle_sidebar(self):
-        if self.sidebar_animation is not None:
-            self.after_cancel(self.sidebar_animation)
-            self.sidebar_animation = None
-
-        self.sidebar_expanded = not self.sidebar_expanded
-        if not self.sidebar_expanded:
-            self.sidebar_labels_visible = False
-            self._refresh_navigation()
-        self._sidebar_start_width = int(self.sidebar.cget("width"))
-        self._sidebar_target_width = (
-            self.EXPANDED_WIDTH if self.sidebar_expanded else self.COLLAPSED_WIDTH
-        )
-        if (
-            self._sidebar_start_width == self._sidebar_target_width
-            or self.sidebar_instant_mode
-        ):
-            self._finish_sidebar_animation()
+        if self.is_animating:
             return
-        self._sidebar_started_at = perf_counter()
-        self._last_sidebar_frame_at = self._sidebar_started_at
-        self.sidebar_animation = self.after(self.SIDEBAR_FRAME_MS, self._animate_sidebar)
+
+        self.is_animating = True
+        self._sidebar_target_expanded = not self.sidebar_expanded
+        self._sidebar_target_width = (
+            self.EXPANDED_WIDTH
+            if self._sidebar_target_expanded
+            else self.COLLAPSED_WIDTH
+        )
+        self.sidebar_labels_visible = False
+        self._refresh_navigation()
+        self.after(self.SIDEBAR_FRAME_MS, self._animate_sidebar)
 
     def _animate_sidebar(self):
-        now = perf_counter()
-        if now - self._last_sidebar_frame_at > self.MAX_FRAME_GAP_SECONDS:
-            self.sidebar_instant_mode = True
+        current_width = int(self.sidebar.cget("width"))
+        remaining = self._sidebar_target_width - current_width
+        if remaining == 0:
             self._finish_sidebar_animation()
             return
 
-        progress = min(
-            (now - self._sidebar_started_at) / self.SIDEBAR_ANIMATION_SECONDS, 1.0
-        )
-        eased = progress * progress * (3 - 2 * progress)
-        width = round(
-            self._sidebar_start_width
-            + (self._sidebar_target_width - self._sidebar_start_width) * eased
-        )
-        if width != int(self.sidebar.cget("width")):
-            self.sidebar.configure(width=width)
-
-        if progress >= 1:
+        step = min(self.SIDEBAR_STEP, abs(remaining))
+        self.sidebar.configure(width=current_width + (step if remaining > 0 else -step))
+        if step == abs(remaining):
             self._finish_sidebar_animation()
         else:
-            self._last_sidebar_frame_at = now
-            self.sidebar_animation = self.after(
-                self.SIDEBAR_FRAME_MS, self._animate_sidebar
-            )
+            self.after(self.SIDEBAR_FRAME_MS, self._animate_sidebar)
 
     def _finish_sidebar_animation(self):
-        self.sidebar.configure(width=self._sidebar_target_width)
-        self.sidebar_animation = None
+        self.sidebar_expanded = self._sidebar_target_expanded
         self.sidebar_labels_visible = self.sidebar_expanded
         self._refresh_navigation()
+        self.is_animating = False
 
     def _refresh_navigation(self):
         for name, (button, symbol) in self.nav_buttons.items():
