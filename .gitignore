@@ -1,6 +1,6 @@
-__pycache__/
-*.py[cod]
-packages/
-build/
+node_modules/
 dist/
-*.spec
+release/
+packages/
+*.log
+

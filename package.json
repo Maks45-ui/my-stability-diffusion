@@ -1,0 +1,30 @@
+{
+  "name": "flow-ai-manager",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Flow desktop AI package manager",
+  "packageManager": "pnpm@11.25.0",
+  "main": "dist/main.js",
+  "scripts": {
+    "postinstall": "node node_modules/electron/install.js",
+    "check": "tsc --noEmit",
+    "build": "pnpm run check && node scripts/build.mts",
+    "start": "pnpm run build && electron .",
+    "dist:win": "pnpm run build && electron-builder --win --dir"
+  },
+  "engines": { "node": ">=24" },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.9.3"
+  },
+  "build": {
+    "appId": "com.maks45ui.flow",
+    "productName": "Flow",
+    "files": ["dist/**/*", "package.json"],
+    "directories": { "output": "release" },
+    "win": { "icon": "assets/logo.ico" }
+  }
+}
+
