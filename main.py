@@ -114,6 +114,7 @@ class FlowApp(ctk.CTk):
     def _add_nav_button(self, name, symbol, row):
         button = ctk.CTkButton(
             self.sidebar,
+            width=48,
             height=44,
             corner_radius=10,
             font=ctk.CTkFont(size=15),
