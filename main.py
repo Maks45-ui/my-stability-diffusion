@@ -55,7 +55,6 @@ class FlowApp(ctk.CTk):
         self._load_logo()
 
         self.sidebar_expanded = True
-        self.sidebar_labels_visible = True
         self.is_animating = False
         self.active_page = "Главная"
         self.nav_buttons = {}
@@ -116,16 +115,43 @@ class FlowApp(ctk.CTk):
         self._add_nav_button(name, symbol, 5)
 
     def _add_nav_button(self, name, symbol, row):
-        button = ctk.CTkButton(
+        item = ctk.CTkFrame(
             self.sidebar,
             width=48,
             height=44,
             corner_radius=10,
+            fg_color=self.SIDEBAR,
+        )
+        item.grid(row=row, column=0, padx=12, pady=4, sticky="ew")
+        item.grid_propagate(False)
+        item.grid_columnconfigure(1, weight=1)
+
+        icon_button = ctk.CTkButton(
+            item,
+            text=symbol,
+            width=48,
+            height=44,
+            corner_radius=10,
+            fg_color="transparent",
+            text_color=self.TEXT,
+            font=ctk.CTkFont(size=18),
+            command=lambda page=name: self.show_page(page),
+        )
+        icon_button.grid(row=0, column=0)
+
+        label_button = ctk.CTkButton(
+            item,
+            text=name,
+            height=44,
+            corner_radius=10,
+            fg_color="transparent",
+            text_color=self.TEXT,
+            anchor="w",
             font=ctk.CTkFont(size=15),
             command=lambda page=name: self.show_page(page),
         )
-        button.grid(row=row, column=0, padx=12, pady=4, sticky="ew")
-        self.nav_buttons[name] = (button, symbol)
+        label_button.grid(row=0, column=1, sticky="ew")
+        self.nav_buttons[name] = (item, icon_button, label_button)
 
     def _build_main_area(self):
         main = ctk.CTkFrame(self, corner_radius=0, fg_color=self.BACKGROUND)
@@ -186,8 +212,8 @@ class FlowApp(ctk.CTk):
             if self._sidebar_target_expanded
             else self.COLLAPSED_WIDTH
         )
-        self.sidebar_labels_visible = False
-        self._refresh_navigation()
+        for _, _, label_button in self.nav_buttons.values():
+            label_button.grid_remove()
         self.after(self.SIDEBAR_FRAME_MS, self._animate_sidebar)
 
     def _animate_sidebar(self):
@@ -206,20 +232,20 @@ class FlowApp(ctk.CTk):
 
     def _finish_sidebar_animation(self):
         self.sidebar_expanded = self._sidebar_target_expanded
-        self.sidebar_labels_visible = self.sidebar_expanded
-        self._refresh_navigation()
+        if self.sidebar_expanded:
+            for _, _, label_button in self.nav_buttons.values():
+                label_button.grid()
         self.is_animating = False
 
     def _refresh_navigation(self):
-        for name, (button, symbol) in self.nav_buttons.items():
+        for name, (item, icon_button, label_button) in self.nav_buttons.items():
             selected = name == self.active_page
-            button.configure(
-                text=f"{symbol}   {name}" if self.sidebar_labels_visible else symbol,
-                anchor="w" if self.sidebar_labels_visible else "center",
-                fg_color=self.ACCENT if selected else "transparent",
-                hover_color=self.ACCENT_HOVER if selected else self.HOVER,
-                text_color=self.TEXT,
-            )
+            item.configure(fg_color=self.ACCENT if selected else self.SIDEBAR)
+            for button in (icon_button, label_button):
+                button.configure(
+                    hover_color=self.ACCENT_HOVER if selected else self.HOVER,
+                    text_color=self.TEXT,
+                )
 
     def show_page(self, page_name):
         self.active_page = page_name

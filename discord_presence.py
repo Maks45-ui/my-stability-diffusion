@@ -10,7 +10,7 @@ from pypresence import Presence
 CLIENT_ID = "1559517880825942036"
 PAGE_STATES = {
     "Главная": "На главном экране",
-    "Галерея": "Галерея",
+    "Галерея": "Просмотр галереи",
     "Загрузка моделей": "Загрузка моделей",
     "Настройки": "Настройки",
 }
@@ -57,7 +57,7 @@ class DiscordPresence:
                     if self._closed:
                         return
 
-                rpc.update(details="Flow AI Manager", state=state, start=self.started_at)
+                rpc.update(name="Flow", state=state, start=self.started_at)
                 last_state = state
                 next_update_at = monotonic() + self.UPDATE_INTERVAL
         except Exception:
