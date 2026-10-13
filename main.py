@@ -57,6 +57,7 @@ class FlowApp(ctk.CTk):
         self.sidebar_expanded = True
         self.sidebar_labels_visible = True
         self.sidebar_animation = None
+        self.sidebar_instant_mode = False
         self.active_page = "Главная"
         self.nav_buttons = {}
 
@@ -185,7 +186,10 @@ class FlowApp(ctk.CTk):
         self._sidebar_target_width = (
             self.EXPANDED_WIDTH if self.sidebar_expanded else self.COLLAPSED_WIDTH
         )
-        if self._sidebar_start_width == self._sidebar_target_width:
+        if (
+            self._sidebar_start_width == self._sidebar_target_width
+            or self.sidebar_instant_mode
+        ):
             self._finish_sidebar_animation()
             return
         self._sidebar_started_at = perf_counter()
@@ -195,6 +199,7 @@ class FlowApp(ctk.CTk):
     def _animate_sidebar(self):
         now = perf_counter()
         if now - self._last_sidebar_frame_at > self.MAX_FRAME_GAP_SECONDS:
+            self.sidebar_instant_mode = True
             self._finish_sidebar_animation()
             return
 
