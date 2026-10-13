@@ -1,0 +1,40 @@
+name: Build Windows app
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Build executable
+        shell: pwsh
+        run: |
+          $packagePath = (python -c "import pathlib, customtkinter; print(pathlib.Path(customtkinter.__file__).parent)").Trim()
+          python -m PyInstaller --noconfirm --clean --onedir --windowed --name MyStabilityMatrix --add-data "${packagePath};customtkinter" main.py
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v7
+        with:
+          name: MyStabilityMatrix-Windows
+          path: dist/MyStabilityMatrix/
+          if-no-files-found: error
+
