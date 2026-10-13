@@ -54,6 +54,16 @@ def installed_packages():
     return [(PACKAGE_NAME, package_path())] if is_installed() else []
 
 
+def package_version():
+    if not is_installed():
+        return ""
+    try:
+        marker = json.loads((package_path() / MARKER_NAME).read_text(encoding="utf-8"))
+        return str(marker.get("version") or "Версия не указана")
+    except (OSError, ValueError, AttributeError):
+        return "Версия не указана"
+
+
 def find_git():
     git = shutil.which("git")
     if not git:
@@ -100,8 +110,9 @@ def find_python():
 
 
 class WebUIInstaller:
-    def __init__(self, log):
+    def __init__(self, log, stage=None):
         self.log = log
+        self.stage = stage or (lambda _name: None)
         self._cancelled = threading.Event()
         self._process = None
         self._process_lock = threading.Lock()
@@ -171,6 +182,7 @@ class WebUIInstaller:
             process.stdout.close()
 
     def install(self):
+        self.stage("check")
         self.log("Проверка Git и Python 3.10…")
         git = find_git()
         python = find_python()
@@ -178,6 +190,7 @@ class WebUIInstaller:
         directory = package_path()
         directory.parent.mkdir(parents=True, exist_ok=True)
 
+        self.stage("clone")
         if directory.exists():
             if not (directory / ".git").is_dir():
                 raise InstallationError(
@@ -205,18 +218,28 @@ class WebUIInstaller:
                 raise
 
         self._check_cancelled()
+        self.stage("venv")
         if not venv_python(directory).is_file():
             self.log("Создание виртуального окружения…")
             self._run(python + ["-m", "venv", directory / "venv"], cwd=directory)
 
         if not (directory / "launch.py").is_file():
             raise InstallationError("Файл launch.py не найден в репозитории WebUI.")
+        self.stage("dependencies")
         self.log("Установка зависимостей WebUI. Это может занять несколько минут…")
         self._run(
             [venv_python(directory), "-u", "launch.py", "--exit", "--skip-torch-cuda-test"],
             cwd=directory,
         )
         self._check_cancelled()
+        try:
+            version_result = subprocess.run(
+                [git, "-C", str(directory), "describe", "--tags", "--always"],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+            version = version_result.stdout.strip() if version_result.returncode == 0 else "Версия не указана"
+        except (OSError, subprocess.TimeoutExpired):
+            version = "Версия не указана"
         if os.name == "nt":
             settings = directory / "webui.settings.bat"
             if not settings.exists():
@@ -226,10 +249,11 @@ class WebUIInstaller:
                     encoding="mbcs",
                 )
         (directory / MARKER_NAME).write_text(
-            json.dumps({"name": PACKAGE_NAME, "repository": REPOSITORY_URL}, ensure_ascii=False),
+            json.dumps({"name": PACKAGE_NAME, "repository": REPOSITORY_URL, "version": version}, ensure_ascii=False),
             encoding="utf-8",
         )
         self.log("AUTOMATIC1111 WebUI установлен.")
+        self.stage("done")
         return directory
 
 
@@ -249,4 +273,20 @@ def launch_webui():
         raise InstallationError(f"Файл запуска не найден: {script}")
     environment = os.environ.copy()
     environment.setdefault("STABLE_DIFFUSION_REPO", STABLE_DIFFUSION_REPOSITORY)
-    subprocess.Popen(command, cwd=directory, creationflags=flags, env=environment)
+    return subprocess.Popen(command, cwd=directory, creationflags=flags, env=environment)
+
+
+def open_package_settings():
+    if not is_installed():
+        raise InstallationError("Пакет ещё не установлен.")
+    directory = package_path()
+    if os.name == "nt":
+        settings = directory / "webui.settings.bat"
+        if not settings.exists():
+            settings.write_text(
+                f'@echo off\nset PYTHON="{venv_python(directory)}"\n'
+                f'set STABLE_DIFFUSION_REPO={STABLE_DIFFUSION_REPOSITORY}\n',
+                encoding="mbcs",
+            )
+        return subprocess.Popen(["notepad.exe", str(settings)], cwd=directory)
+    return subprocess.Popen(["xdg-open", str(directory)], cwd=directory)
