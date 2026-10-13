@@ -22,9 +22,10 @@ class InstallDialog(ctk.CTkToplevel):
         self.installer = None
         self.installing = False
         self._log_chars = 0
+        self._log_visible = True
 
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(3, weight=1)
+        self.grid_rowconfigure(4, weight=1)
 
         ctk.CTkLabel(
             self, text="Добавить пакет", text_color=master.TEXT,
@@ -52,22 +53,42 @@ class InstallDialog(ctk.CTkToplevel):
             text_color=master.MUTED,
         ).grid(row=1, column=0, padx=18, pady=(0, 14), sticky="w")
 
-        log_frame = ctk.CTkFrame(self, corner_radius=14, fg_color=master.CARD)
-        log_frame.grid(row=3, column=0, padx=28, pady=(16, 12), sticky="nsew")
-        log_frame.grid_columnconfigure(0, weight=1)
-        log_frame.grid_rowconfigure(1, weight=1)
+        progress_area = ctk.CTkFrame(self, fg_color="transparent")
+        progress_area.grid(row=3, column=0, padx=28, pady=(14, 0), sticky="ew")
+        progress_area.grid_columnconfigure(0, weight=1)
+        self.stage_label = ctk.CTkLabel(
+            progress_area, text="Готово к установке", text_color=master.MUTED,
+            font=ctk.CTkFont(size=13, weight="bold"),
+        )
+        self.stage_label.grid(row=0, column=0, sticky="w")
+        self.progress = ctk.CTkProgressBar(
+            progress_area, height=8, progress_color=master.ACCENT,
+        )
+        self.progress.grid(row=1, column=0, pady=(8, 0), sticky="ew")
+        self.progress.set(0)
+        self.log_toggle = ctk.CTkButton(
+            progress_area, text="Скрыть журнал  ▴", width=145, height=30,
+            fg_color="transparent", hover_color=master.HOVER,
+            text_color=master.MUTED, command=self._toggle_log,
+        )
+        self.log_toggle.grid(row=2, column=0, pady=(4, 0), sticky="w")
+
+        self.log_frame = ctk.CTkFrame(self, corner_radius=14, fg_color=master.CARD)
+        self.log_frame.grid(row=4, column=0, padx=28, pady=(4, 12), sticky="nsew")
+        self.log_frame.grid_columnconfigure(0, weight=1)
+        self.log_frame.grid_rowconfigure(1, weight=1)
         ctk.CTkLabel(
-            log_frame, text="Журнал установки", text_color=master.TEXT,
+            self.log_frame, text="Журнал установки", text_color=master.TEXT,
             font=ctk.CTkFont(size=14, weight="bold"),
         ).grid(row=0, column=0, padx=16, pady=(12, 6), sticky="w")
         self.log_box = ctk.CTkTextbox(
-            log_frame, corner_radius=8, fg_color=master.BACKGROUND,
+            self.log_frame, corner_radius=8, fg_color=master.BACKGROUND,
             text_color=master.TEXT, wrap="word", state="disabled",
         )
         self.log_box.grid(row=1, column=0, padx=16, pady=(0, 16), sticky="nsew")
 
         controls = ctk.CTkFrame(self, fg_color="transparent")
-        controls.grid(row=4, column=0, padx=28, pady=(0, 22), sticky="ew")
+        controls.grid(row=5, column=0, padx=28, pady=(0, 22), sticky="ew")
         controls.grid_columnconfigure(0, weight=1)
         self.status = ctk.CTkLabel(
             controls, text="Готово к установке", text_color=master.MUTED,
@@ -90,6 +111,19 @@ class InstallDialog(ctk.CTkToplevel):
         self.after(100, self._pump_events)
         self.after(100, self.grab_set)
 
+    def _toggle_log(self):
+        self._log_visible = not self._log_visible
+        if self._log_visible:
+            self.log_frame.grid()
+            self.grid_rowconfigure(4, weight=1)
+            self.log_toggle.configure(text="Скрыть журнал  ▴")
+            self.geometry(f"{self.winfo_width()}x560")
+        else:
+            self.log_frame.grid_remove()
+            self.grid_rowconfigure(4, weight=0)
+            self.log_toggle.configure(text="Показать журнал  ▾")
+            self.geometry(f"{self.winfo_width()}x460")
+
     def _append_log(self, message):
         self.log_box.configure(state="normal")
         self.log_box.insert("end", message + "\n")
@@ -107,8 +141,14 @@ class InstallDialog(ctk.CTkToplevel):
         self.install_button.configure(state="disabled")
         self.close_button.configure(text="Отмена")
         self.status.configure(text="Установка выполняется…")
+        self.stage_label.configure(text="Шаг 1/4 · Проверка окружения")
+        self.progress.configure(mode="indeterminate")
+        self.progress.start()
         self._append_log("Начало установки AUTOMATIC1111 WebUI")
-        self.installer = WebUIInstaller(lambda line: self.events.put(("log", line)))
+        self.installer = WebUIInstaller(
+            lambda line: self.events.put(("log", line)),
+            lambda stage: self.events.put(("stage", stage)),
+        )
         threading.Thread(target=self._install_worker, daemon=True).start()
 
     def _install_worker(self):
@@ -133,6 +173,15 @@ class InstallDialog(ctk.CTkToplevel):
                 kind, message = self.events.get_nowait()
                 if kind == "log":
                     lines.append(message)
+                elif kind == "stage":
+                    stages = {
+                        "check": "Шаг 1/4 · Проверка Git и Python",
+                        "clone": "Шаг 2/4 · Загрузка WebUI",
+                        "venv": "Шаг 3/4 · Виртуальное окружение",
+                        "dependencies": "Шаг 4/4 · Установка зависимостей",
+                        "done": "Готово · пакет добавлен",
+                    }
+                    self.stage_label.configure(text=stages.get(message, message))
                 else:
                     result = (kind, message)
         except Empty:
@@ -142,6 +191,9 @@ class InstallDialog(ctk.CTkToplevel):
         if result is not None:
             kind, message = result
             self.installing = False
+            self.progress.stop()
+            self.progress.configure(mode="determinate")
+            self.progress.set(1 if kind == "done" else 0)
             self._append_log(message)
             self.status.configure(text=message)
             self.close_button.configure(text="Закрыть", state="normal")
