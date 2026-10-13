@@ -21,6 +21,7 @@ class InstallDialog(ctk.CTkToplevel):
         self.events = Queue()
         self.installer = None
         self.installing = False
+        self._log_chars = 0
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(3, weight=1)
@@ -92,6 +93,10 @@ class InstallDialog(ctk.CTkToplevel):
     def _append_log(self, message):
         self.log_box.configure(state="normal")
         self.log_box.insert("end", message + "\n")
+        self._log_chars += len(message) + 1
+        if self._log_chars > 120_000:
+            self.log_box.delete("1.0", "1.0 + 50_000 chars")
+            self._log_chars -= 50_000
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
 
@@ -121,22 +126,29 @@ class InstallDialog(ctk.CTkToplevel):
     def _pump_events(self):
         if not self.winfo_exists():
             return
+        lines = []
+        result = None
         try:
-            while True:
+            for _ in range(100):
                 kind, message = self.events.get_nowait()
                 if kind == "log":
-                    self._append_log(message)
+                    lines.append(message)
                 else:
-                    self.installing = False
-                    self._append_log(message)
-                    self.status.configure(text=message)
-                    self.close_button.configure(text="Закрыть", state="normal")
-                    if kind == "done":
-                        self.on_installed()
-                    elif kind in ("error", "cancelled"):
-                        self.install_button.configure(state="normal")
+                    result = (kind, message)
         except Empty:
             pass
+        if lines:
+            self._append_log("\n".join(lines))
+        if result is not None:
+            kind, message = result
+            self.installing = False
+            self._append_log(message)
+            self.status.configure(text=message)
+            self.close_button.configure(text="Закрыть", state="normal")
+            if kind == "done":
+                self.on_installed()
+            elif kind in ("error", "cancelled"):
+                self.install_button.configure(state="normal")
         self.after(100, self._pump_events)
 
     def _close(self):
