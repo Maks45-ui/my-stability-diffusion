@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import signal
 import subprocess
+import sys
 import threading
 
 
@@ -25,7 +26,9 @@ class InstallationCancelled(InstallationError):
 
 
 def packages_root():
-    """Keep downloads outside PyInstaller's temporary extraction directory."""
+    """Use project/packages in source runs and writable app data for the exe."""
+    if not getattr(sys, "frozen", False):
+        return Path(__file__).resolve().parent / "packages"
     if os.name == "nt":
         base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
         return base / "Flow" / "packages"
