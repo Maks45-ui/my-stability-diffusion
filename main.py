@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from time import perf_counter
 from tkinter import TclError
 
 import customtkinter as ctk
@@ -23,6 +24,9 @@ class FlowApp(ctk.CTk):
 
     EXPANDED_WIDTH = 242
     COLLAPSED_WIDTH = 72
+    SIDEBAR_ANIMATION_SECONDS = 0.16
+    SIDEBAR_FRAME_MS = 20
+    MAX_FRAME_GAP_SECONDS = 0.05
     NAV_ITEMS = (
         ("Главная", "⌂"),
         ("Галерея", "▦"),
@@ -43,6 +47,7 @@ class FlowApp(ctk.CTk):
         self.minsize(900, 600)
         self.configure(fg_color=self.BACKGROUND)
         self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=0)
         self.grid_columnconfigure(1, weight=1)
 
         self.logo_image = None
@@ -50,6 +55,7 @@ class FlowApp(ctk.CTk):
         self._load_logo()
 
         self.sidebar_expanded = True
+        self.sidebar_labels_visible = True
         self.sidebar_animation = None
         self.active_page = "Главная"
         self.nav_buttons = {}
@@ -173,28 +179,56 @@ class FlowApp(ctk.CTk):
 
         self.sidebar_expanded = not self.sidebar_expanded
         if not self.sidebar_expanded:
+            self.sidebar_labels_visible = False
             self._refresh_navigation()
-        target = self.EXPANDED_WIDTH if self.sidebar_expanded else self.COLLAPSED_WIDTH
-        self._animate_sidebar(target)
+        self._sidebar_start_width = int(self.sidebar.cget("width"))
+        self._sidebar_target_width = (
+            self.EXPANDED_WIDTH if self.sidebar_expanded else self.COLLAPSED_WIDTH
+        )
+        if self._sidebar_start_width == self._sidebar_target_width:
+            self._finish_sidebar_animation()
+            return
+        self._sidebar_started_at = perf_counter()
+        self._last_sidebar_frame_at = self._sidebar_started_at
+        self.sidebar_animation = self.after(self.SIDEBAR_FRAME_MS, self._animate_sidebar)
 
-    def _animate_sidebar(self, target):
-        current = int(self.sidebar.cget("width"))
-        distance = target - current
-        if abs(distance) <= 18:
-            self.sidebar.configure(width=target)
-            self.sidebar_animation = None
-            self._refresh_navigation()
+    def _animate_sidebar(self):
+        now = perf_counter()
+        if now - self._last_sidebar_frame_at > self.MAX_FRAME_GAP_SECONDS:
+            self._finish_sidebar_animation()
             return
 
-        self.sidebar.configure(width=current + (18 if distance > 0 else -18))
-        self.sidebar_animation = self.after(12, lambda: self._animate_sidebar(target))
+        progress = min(
+            (now - self._sidebar_started_at) / self.SIDEBAR_ANIMATION_SECONDS, 1.0
+        )
+        eased = progress * progress * (3 - 2 * progress)
+        width = round(
+            self._sidebar_start_width
+            + (self._sidebar_target_width - self._sidebar_start_width) * eased
+        )
+        if width != int(self.sidebar.cget("width")):
+            self.sidebar.configure(width=width)
+
+        if progress >= 1:
+            self._finish_sidebar_animation()
+        else:
+            self._last_sidebar_frame_at = now
+            self.sidebar_animation = self.after(
+                self.SIDEBAR_FRAME_MS, self._animate_sidebar
+            )
+
+    def _finish_sidebar_animation(self):
+        self.sidebar.configure(width=self._sidebar_target_width)
+        self.sidebar_animation = None
+        self.sidebar_labels_visible = self.sidebar_expanded
+        self._refresh_navigation()
 
     def _refresh_navigation(self):
         for name, (button, symbol) in self.nav_buttons.items():
             selected = name == self.active_page
             button.configure(
-                text=f"{symbol}   {name}" if self.sidebar_expanded else symbol,
-                anchor="w" if self.sidebar_expanded else "center",
+                text=f"{symbol}   {name}" if self.sidebar_labels_visible else symbol,
+                anchor="w" if self.sidebar_labels_visible else "center",
                 fg_color=self.ACCENT if selected else "transparent",
                 hover_color=self.ACCENT_HOVER if selected else self.HOVER,
                 text_color=self.TEXT,
