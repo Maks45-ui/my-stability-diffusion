@@ -52,7 +52,7 @@ pub(crate) async fn search_models(app: AppHandle, query: String) -> Result<Vec<M
     let mut request = client()?.get(API).query(&[("limit", "12"), ("nsfw", "true")]);
     if !trimmed.is_empty() {
         request = if trimmed.parse::<u64>().is_ok() { request.query(&[("ids", trimmed)]) } else { request.query(&[("query", trimmed)]) };
-    }
+    } else { request = request.query(&[("sort", "Most Downloaded")]); }
     let token = civitai_token(&app)?;
     if !token.is_empty() { request = request.bearer_auth(token); }
     let response = request.send().await.map_err(|error| error.to_string())?.error_for_status().map_err(|error| error.to_string())?;
@@ -60,13 +60,34 @@ pub(crate) async fn search_models(app: AppHandle, query: String) -> Result<Vec<M
     let models = root.get("items").and_then(Value::as_array).ok_or("Некорректный ответ Civitai.")?;
     Ok(models.iter().filter_map(|model| {
         let id = model.get("id")?.as_u64()?;
-        let version = model.get("modelVersions").and_then(Value::as_array).and_then(|versions| versions.first());
-        let images = version.and_then(|v| v.get("images")).and_then(Value::as_array).map(|items| items.iter().filter_map(|item| item.get("url")?.as_str().map(str::to_owned)).take(12).collect()).unwrap_or_default();
-        let files = version.and_then(|v| v.get("files")).and_then(Value::as_array).map(|items| items.iter().filter_map(|item| Some(ModelFile {
-            name: item.get("name")?.as_str()?.to_owned(),
-            download_url: item.get("downloadUrl")?.as_str()?.to_owned(),
-            size_kb: item.get("sizeKB").and_then(Value::as_f64).unwrap_or(0.0),
-        })).collect()).unwrap_or_default();
+        let mut images: Vec<String> = Vec::new();
+        let mut files: Vec<ModelFile> = Vec::new();
+        if let Some(versions) = model.get("modelVersions").and_then(Value::as_array) {
+            // Keep every example and file across versions, as in the previous catalog.
+            for version in versions {
+                if let Some(examples) = version.get("images").and_then(Value::as_array) {
+                    for image in examples {
+                        if image.get("type").and_then(Value::as_str) == Some("video") { continue; }
+                        if let Some(url) = image.get("url").and_then(Value::as_str) {
+                            if !images.iter().any(|saved| saved.as_str() == url) { images.push(url.to_owned()); }
+                        }
+                    }
+                }
+                if let Some(available) = version.get("files").and_then(Value::as_array) {
+                    for item in available {
+                        if let (Some(name), Some(download_url)) = (
+                            item.get("name").and_then(Value::as_str),
+                            item.get("downloadUrl").and_then(Value::as_str),
+                        ) {
+                            files.push(ModelFile {
+                                name: name.to_owned(), download_url: download_url.to_owned(),
+                                size_kb: item.get("sizeKB").and_then(Value::as_f64).unwrap_or(0.0),
+                            });
+                        }
+                    }
+                }
+            }
+        }
         Some(ModelSummary {
             id,
             name: model.get("name").and_then(Value::as_str).unwrap_or("Без названия").to_owned(),
@@ -99,8 +120,9 @@ fn safe_name(value: &str) -> String {
 }
 
 fn download(app: &AppHandle, control: &DownloadControl, file: ModelFile, model_type: String) -> Result<(), String> {
-    let url = allowed_url(&file.download_url)?;
+    let mut url = allowed_url(&file.download_url)?;
     if !url.path().starts_with("/api/download/models/") { return Err("Недопустимая ссылка скачивания.".to_owned()); }
+    url.set_host(Some("civitai.red")).map_err(|_| "Недопустимый адрес скачивания.".to_owned())?;
     let name = safe_name(&file.name);
     if name.is_empty() { return Err("Некорректное имя файла.".to_owned()); }
     let folder = data_dir(app)?.join("models").join(safe_name(&model_type));
@@ -159,3 +181,4 @@ pub(crate) async fn download_model(app: AppHandle, state: State<'_, Arc<Download
 pub(crate) fn cancel_download(state: State<'_, Arc<DownloadControl>>) {
     state.cancelled.store(true, Ordering::SeqCst);
 }
+
