@@ -8,7 +8,10 @@ from PIL import Image, ImageTk
 
 from discord_presence import DiscordPresence
 from install_dialog import InstallDialog
-from installer import InstallationError, installed_packages, launch_webui
+from installer import (
+    InstallationError, installed_packages, launch_webui, open_package_settings,
+    package_version,
+)
 from models_frame import ModelsFrame
 
 
@@ -37,10 +40,8 @@ class SettingsFrame(ctk.CTkFrame):
 
         card = ctk.CTkFrame(
             self,
-            corner_radius=18,
+            corner_radius=16,
             fg_color=app.CARD,
-            border_width=1,
-            border_color=app.BORDER,
         )
         card.grid(row=2, column=0, sticky="nsew")
         card.grid_columnconfigure(0, weight=1)
@@ -59,7 +60,7 @@ class SettingsFrame(ctk.CTkFrame):
             ("Установка пакетов", "AUTOMATIC1111 WebUI"),
         )
         for row, (title, value) in enumerate(settings, start=1):
-            option = ctk.CTkFrame(card, corner_radius=10, fg_color=app.HOVER)
+            option = ctk.CTkFrame(card, corner_radius=10, fg_color=app.SURFACE)
             option.grid(row=row, column=0, padx=28, pady=(0, 8), sticky="ew")
             option.grid_columnconfigure(0, weight=1)
             ctk.CTkLabel(
@@ -78,18 +79,20 @@ class SettingsFrame(ctk.CTkFrame):
 
 
 class FlowApp(ctk.CTk):
-    BACKGROUND = "#1E1E1E"
-    SIDEBAR = "#252526"
-    CARD = "#2B2B2D"
-    BORDER = "#39393D"
-    HOVER = "#34363A"
+    BACKGROUND = "#191D23"
+    SIDEBAR = "#20252D"
+    CARD = "#242B34"
+    SURFACE = "#2C3540"
+    BORDER = "#3B4653"
+    HOVER = "#34404D"
     ACCENT = "#2B82C5"
-    ACCENT_HOVER = "#1F6AA5"
-    TEXT = "#F5F6F8"
-    MUTED = "#A9ADB5"
+    ACCENT_HOVER = "#236FA9"
+    TEXT = "#F4F7FB"
+    MUTED = "#A9B5C2"
+    SUCCESS = "#58D2A5"
 
-    EXPANDED_WIDTH = 220
-    COLLAPSED_WIDTH = 70
+    EXPANDED_WIDTH = 224
+    COLLAPSED_WIDTH = 72
     NAV_HIGHLIGHT_STEPS = 5
     NAV_HIGHLIGHT_FRAME_MS = 20
     NAV_ITEMS = (
@@ -128,11 +131,16 @@ class FlowApp(ctk.CTk):
         self._nav_highlight_job = None
         self.models_frame = None
         self.install_dialog = None
+        self.webui_process = None
+        self._package_poll_job = None
+        self.package_badge = None
+        self.package_start_button = None
         self.discord_presence = DiscordPresence()
 
         self._build_sidebar()
         self._build_main_area()
         self.show_page("Главная")
+        self._sync_package_status()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _load_logo(self):
@@ -144,7 +152,7 @@ class FlowApp(ctk.CTk):
                 with Image.open(logo_path) as source:
                     logo = source.convert("RGBA")
                 self.logo_image = ctk.CTkImage(
-                    light_image=logo, dark_image=logo, size=(54, 54)
+                    light_image=logo, dark_image=logo, size=(44, 44)
                 )
                 self.window_icon = ImageTk.PhotoImage(logo)
                 self.after(250, self._set_window_icon)
@@ -202,9 +210,9 @@ class FlowApp(ctk.CTk):
         button = ctk.CTkButton(
             self.sidebar,
             width=46,
-            height=44,
+            height=46,
             corner_radius=10,
-            border_spacing=5,
+            border_spacing=9,
             text=name if icon is not None else f"{fallback}  {name}",
             image=icon,
             compound="left",
@@ -224,7 +232,7 @@ class FlowApp(ctk.CTk):
         main.grid_columnconfigure(0, weight=1)
         main.grid_rowconfigure(2, weight=1)
 
-        header = ctk.CTkFrame(main, height=96, corner_radius=0, fg_color=self.BACKGROUND)
+        header = ctk.CTkFrame(main, height=82, corner_radius=0, fg_color=self.BACKGROUND)
         header.grid(row=0, column=0, sticky="ew")
         header.grid_propagate(False)
         header.grid_columnconfigure(1, weight=1)
@@ -235,34 +243,34 @@ class FlowApp(ctk.CTk):
             logo_label = ctk.CTkLabel(
                 header,
                 text="F",
-                width=54,
-                height=54,
+                width=44,
+                height=44,
                 corner_radius=13,
                 fg_color=self.ACCENT,
                 text_color=self.TEXT,
-                font=ctk.CTkFont(size=30, weight="bold"),
+                font=ctk.CTkFont(size=25, weight="bold"),
             )
-        logo_label.grid(row=0, column=0, rowspan=2, padx=(32, 14), pady=21)
+        logo_label.grid(row=0, column=0, rowspan=2, padx=(28, 12), pady=19)
 
         ctk.CTkLabel(
             header,
             text="Flow",
             text_color=self.TEXT,
-            font=ctk.CTkFont(size=25, weight="bold"),
-        ).grid(row=0, column=1, sticky="sw", pady=(18, 0))
+            font=ctk.CTkFont(size=23, weight="bold"),
+        ).grid(row=0, column=1, sticky="sw", pady=(14, 0))
         ctk.CTkLabel(
             header,
             text="Творчество под вашим контролем",
             text_color=self.MUTED,
-            font=ctk.CTkFont(size=13),
-        ).grid(row=1, column=1, sticky="nw", pady=(0, 18))
+            font=ctk.CTkFont(size=12),
+        ).grid(row=1, column=1, sticky="nw", pady=(0, 14))
 
         ctk.CTkFrame(main, height=1, corner_radius=0, fg_color=self.BORDER).grid(
             row=1, column=0, sticky="ew"
         )
 
         self.page_container = ctk.CTkFrame(main, fg_color="transparent")
-        self.page_container.grid(row=2, column=0, padx=32, pady=(25, 28), sticky="nsew")
+        self.page_container.grid(row=2, column=0, padx=28, pady=(24, 24), sticky="nsew")
         self.page_container.grid_columnconfigure(0, weight=1)
         self.page_container.grid_rowconfigure(2, weight=1)
 
@@ -396,6 +404,8 @@ class FlowApp(ctk.CTk):
     def _on_close(self):
         if self._nav_highlight_job is not None:
             self.after_cancel(self._nav_highlight_job)
+        if self._package_poll_job is not None:
+            self.after_cancel(self._package_poll_job)
         if self.install_dialog is not None and self.install_dialog.winfo_exists():
             if self.install_dialog.installing:
                 threading.Thread(target=self.install_dialog.installer.cancel, daemon=True).start()
@@ -407,81 +417,145 @@ class FlowApp(ctk.CTk):
     def _card(self, parent):
         return ctk.CTkFrame(
             parent,
-            corner_radius=18,
+            corner_radius=16,
             fg_color=self.CARD,
-            border_width=1,
-            border_color=self.BORDER,
         )
 
     def _render_home(self, body):
-        card = self._card(body)
-        card.grid(row=0, column=0, sticky="nsew")
-        card.grid_columnconfigure(0, weight=1)
-        card.grid_rowconfigure(1, weight=1)
-
-        ctk.CTkLabel(
-            card,
-            text="Установленные пакеты",
-            text_color=self.TEXT,
-            font=ctk.CTkFont(size=20, weight="bold"),
-        ).grid(row=0, column=0, padx=28, pady=(24, 0), sticky="w")
-
         packages = installed_packages()
+        body.grid_rowconfigure(0, weight=0)
+        body.grid_rowconfigure(1, weight=1)
+
+        overview = ctk.CTkFrame(body, fg_color="transparent")
+        overview.grid(row=0, column=0, pady=(0, 18), sticky="ew")
+        overview.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            overview, text="ВАША БИБЛИОТЕКА", text_color=self.ACCENT,
+            font=ctk.CTkFont(size=12, weight="bold"),
+        ).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(
+            overview, text="Пакеты и окружения", text_color=self.TEXT,
+            font=ctk.CTkFont(size=21, weight="bold"),
+        ).grid(row=1, column=0, pady=(3, 0), sticky="w")
+        ctk.CTkLabel(
+            overview, text=f"Пакетов: {len(packages)}", text_color=self.MUTED,
+            fg_color=self.CARD, corner_radius=9,
+            font=ctk.CTkFont(size=12), width=112, height=30,
+        ).grid(row=0, column=1, rowspan=2, sticky="e")
+
+        board = ctk.CTkFrame(body, fg_color="transparent")
+        board.grid(row=1, column=0, sticky="nsew")
+        board.grid_columnconfigure(0, weight=3)
+        board.grid_columnconfigure(1, weight=2)
+        board.grid_rowconfigure(0, weight=1)
+
+        library = self._card(board)
+        library.grid(row=0, column=0, padx=(0, 16), sticky="nsew")
+        library.grid_columnconfigure(0, weight=1)
+        library.grid_rowconfigure(1, weight=1)
+        ctk.CTkLabel(
+            library, text="Установленные пакеты", text_color=self.TEXT,
+            font=ctk.CTkFont(size=18, weight="bold"),
+        ).grid(row=0, column=0, padx=24, pady=(22, 0), sticky="w")
+
         if packages:
-            list_frame = ctk.CTkFrame(card, fg_color="transparent")
-            list_frame.grid(row=1, column=0, padx=28, pady=24, sticky="nsew")
+            list_frame = ctk.CTkFrame(library, fg_color="transparent")
+            list_frame.grid(row=1, column=0, padx=24, pady=20, sticky="nsew")
             list_frame.grid_columnconfigure(0, weight=1)
             for row, (name, path) in enumerate(packages):
-                item = ctk.CTkFrame(list_frame, fg_color=self.HOVER, corner_radius=12)
-                item.grid(row=row, column=0, pady=(0, 10), sticky="ew")
-                item.grid_columnconfigure(0, weight=1)
-                ctk.CTkLabel(
-                    item, text=name, text_color=self.TEXT,
-                    font=ctk.CTkFont(size=17, weight="bold"),
-                ).grid(row=0, column=0, padx=18, pady=(13, 2), sticky="w")
-                ctk.CTkLabel(
-                    item, text=str(path), text_color=self.MUTED,
-                    font=ctk.CTkFont(size=12), anchor="w",
-                ).grid(row=1, column=0, padx=18, pady=(0, 13), sticky="ew")
-                ctk.CTkButton(
-                    item, text="Запустить", width=115,
-                    fg_color=self.ACCENT, hover_color=self.ACCENT_HOVER,
-                    command=self._launch_webui,
-                ).grid(row=0, column=1, rowspan=2, padx=18)
+                self._render_package_card(list_frame, row, name, path)
         else:
-            empty = ctk.CTkFrame(card, fg_color="transparent")
-            empty.grid(row=1, column=0)
+            empty = ctk.CTkFrame(library, fg_color="transparent")
+            empty.grid(row=1, column=0, padx=24)
             ctk.CTkLabel(
-                empty, text="◈", text_color=self.ACCENT, font=ctk.CTkFont(size=50)
+                empty, text="◈", text_color=self.ACCENT, font=ctk.CTkFont(size=48)
             ).pack()
             ctk.CTkLabel(
-                empty,
-                text="Пакетов пока нет",
-                text_color=self.TEXT,
-                font=ctk.CTkFont(size=20, weight="bold"),
+                empty, text="Библиотека пока пуста", text_color=self.TEXT,
+                font=ctk.CTkFont(size=18, weight="bold"),
             ).pack(pady=(8, 4))
             ctk.CTkLabel(
-                empty,
-                text="Когда вы добавите первый пакет, он появится здесь.",
-                text_color=self.MUTED,
-                font=ctk.CTkFont(size=14),
+                empty, text="Добавьте первый пакет, чтобы начать работу.",
+                text_color=self.MUTED, font=ctk.CTkFont(size=13),
+                wraplength=310,
             ).pack()
 
+        add_card = ctk.CTkFrame(board, corner_radius=16, fg_color="#20354A")
+        add_card.grid(row=0, column=1, sticky="nsew")
+        add_card.grid_columnconfigure(0, weight=1)
+        add_card.grid_rowconfigure(3, weight=1)
+        ctk.CTkLabel(
+            add_card, text="＋", width=48, height=48, corner_radius=12,
+            fg_color=self.ACCENT, text_color=self.TEXT,
+            font=ctk.CTkFont(size=28),
+        ).grid(row=0, column=0, padx=20, pady=(24, 20), sticky="w")
+        ctk.CTkLabel(
+            add_card, text="Новый пакет", text_color=self.TEXT,
+            font=ctk.CTkFont(size=21, weight="bold"),
+        ).grid(row=1, column=0, padx=20, sticky="w")
+        ctk.CTkLabel(
+            add_card,
+            text="Установите WebUI в отдельное окружение. Flow покажет каждый шаг установки.",
+            text_color=self.MUTED, wraplength=190, justify="left",
+            font=ctk.CTkFont(size=13),
+        ).grid(row=2, column=0, padx=20, pady=(8, 0), sticky="nw")
         ctk.CTkButton(
-            body,
-            text="＋  Добавить пакет",
-            width=270,
-            height=54,
-            corner_radius=14,
+            add_card, text="Добавить пакет  →", height=46,
+            corner_radius=10,
             fg_color=self.ACCENT,
             hover_color=self.ACCENT_HOVER,
-            font=ctk.CTkFont(size=17, weight="bold"),
+            font=ctk.CTkFont(size=15, weight="bold"),
             command=self._open_install_dialog,
-        ).grid(row=1, column=0, pady=(22, 4))
+        ).grid(row=4, column=0, padx=20, pady=(16, 8), sticky="ew")
         self.install_status = ctk.CTkLabel(
-            body, text="", text_color=self.MUTED, font=ctk.CTkFont(size=13)
+            add_card, text="", text_color=self.MUTED,
+            font=ctk.CTkFont(size=12), wraplength=190,
         )
-        self.install_status.grid(row=2, column=0)
+        self.install_status.grid(row=5, column=0, padx=20, pady=(0, 18), sticky="w")
+
+    def _render_package_card(self, parent, row, name, path):
+        item = ctk.CTkFrame(parent, fg_color=self.SURFACE, corner_radius=12)
+        item.grid(row=row, column=0, pady=(0, 10), sticky="ew")
+        item.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(
+            item, text="A", width=42, height=42, corner_radius=10,
+            fg_color="#204F73", text_color=self.TEXT,
+            font=ctk.CTkFont(size=19, weight="bold"),
+        ).grid(row=0, column=0, rowspan=2, padx=(16, 12), pady=(16, 0))
+        ctk.CTkLabel(
+            item, text=name, text_color=self.TEXT,
+            font=ctk.CTkFont(size=16, weight="bold"),
+        ).grid(row=0, column=1, pady=(16, 1), sticky="w")
+        ctk.CTkLabel(
+            item, text=f"{package_version()}  ·  Stable Diffusion",
+            text_color=self.MUTED, font=ctk.CTkFont(size=12),
+        ).grid(row=1, column=1, sticky="w")
+        self.package_badge = ctk.CTkLabel(
+            item, text="●  Готов", text_color=self.SUCCESS,
+            fg_color="#24443D", corner_radius=8,
+            font=ctk.CTkFont(size=11, weight="bold"), width=82, height=26,
+        )
+        self.package_badge.grid(row=0, column=2, padx=(6, 16), pady=(16, 0))
+        ctk.CTkLabel(
+            item, text=str(path), text_color=self.MUTED,
+            font=ctk.CTkFont(size=11), anchor="w", wraplength=270,
+        ).grid(row=2, column=0, columnspan=3, padx=16, pady=(12, 14), sticky="ew")
+        actions = ctk.CTkFrame(item, fg_color="transparent")
+        actions.grid(row=3, column=0, columnspan=3, padx=16, pady=(0, 16), sticky="ew")
+        actions.grid_columnconfigure(0, weight=1)
+        actions.grid_columnconfigure(1, weight=1)
+        self.package_start_button = ctk.CTkButton(
+            actions, text="Запустить", height=38, corner_radius=9,
+            fg_color=self.ACCENT, hover_color=self.ACCENT_HOVER,
+            command=self._launch_webui,
+        )
+        self.package_start_button.grid(row=0, column=0, padx=(0, 6), sticky="ew")
+        ctk.CTkButton(
+            actions, text="Настроить", height=38, corner_radius=9,
+            fg_color=self.HOVER, hover_color=self.BORDER,
+            command=self._open_package_settings,
+        ).grid(row=0, column=1, padx=(6, 0), sticky="ew")
+        self._update_package_widgets()
 
     def _open_install_dialog(self):
         if self.install_dialog is not None and self.install_dialog.winfo_exists():
@@ -495,51 +569,77 @@ class FlowApp(ctk.CTk):
             self.show_page("Главная")
 
     def _launch_webui(self):
+        if self.webui_process is not None and self.webui_process.poll() is None:
+            return
         try:
-            launch_webui()
+            self.webui_process = launch_webui()
         except (InstallationError, OSError) as exc:
             self.install_status.configure(text=f"Ошибка запуска: {exc}")
         else:
             self.install_status.configure(text="WebUI запускается в отдельном окне консоли")
+            self._update_package_widgets()
+
+    def _open_package_settings(self):
+        try:
+            open_package_settings()
+        except (InstallationError, OSError) as exc:
+            self.install_status.configure(text=f"Не удалось открыть настройки: {exc}")
+
+    def _update_package_widgets(self):
+        running = self.webui_process is not None and self.webui_process.poll() is None
+        if self.package_badge is not None and self.package_badge.winfo_exists():
+            self.package_badge.configure(
+                text="●  Запущен" if running else "●  Готов",
+                text_color=self.SUCCESS,
+            )
+        if self.package_start_button is not None and self.package_start_button.winfo_exists():
+            self.package_start_button.configure(state="disabled" if running else "normal")
+
+    def _sync_package_status(self):
+        self._package_poll_job = None
+        if self.webui_process is not None and self.webui_process.poll() is not None:
+            self.webui_process = None
+        self._update_package_widgets()
+        self._package_poll_job = self.after(1500, self._sync_package_status)
 
     def _render_gallery(self, body):
         card = self._card(body)
         card.grid(row=0, column=0, sticky="nsew")
         for column in range(3):
             card.grid_columnconfigure(column, weight=1)
+        card.grid_rowconfigure(2, weight=1)
 
         ctk.CTkLabel(
             card,
-            text="Ваши изображения",
+            text="Ваша галерея",
             text_color=self.TEXT,
-            font=ctk.CTkFont(size=20, weight="bold"),
-        ).grid(row=0, column=0, columnspan=3, padx=28, pady=(24, 0), sticky="w")
+            font=ctk.CTkFont(size=19, weight="bold"),
+        ).grid(row=0, column=0, columnspan=3, padx=24, pady=(22, 0), sticky="w")
 
         for column in range(3):
             tile = ctk.CTkFrame(
-                card, height=160, corner_radius=13, fg_color="#353537"
+                card, height=154, corner_radius=12, fg_color=self.SURFACE,
             )
             tile.grid(
-                row=1, column=column, padx=(28 if column == 0 else 8, 28 if column == 2 else 8),
-                pady=(28, 0), sticky="ew"
+                row=1, column=column,
+                padx=(24 if column == 0 else 8, 24 if column == 2 else 8),
+                pady=(24, 0), sticky="ew",
             )
             tile.grid_propagate(False)
             ctk.CTkLabel(
-                tile, text="▧", text_color="#62666D", font=ctk.CTkFont(size=40)
+                tile, text="▧", text_color="#566576", font=ctk.CTkFont(size=36),
             ).place(relx=0.5, rely=0.5, anchor="center")
 
+        empty = ctk.CTkFrame(card, fg_color="transparent")
+        empty.grid(row=2, column=0, columnspan=3)
         ctk.CTkLabel(
-            card,
-            text="Здесь пока нет изображений",
-            text_color=self.TEXT,
+            empty, text="Здесь пока нет изображений", text_color=self.TEXT,
             font=ctk.CTkFont(size=18, weight="bold"),
-        ).grid(row=2, column=0, columnspan=3, pady=(30, 4))
+        ).pack(pady=(0, 5))
         ctk.CTkLabel(
-            card,
-            text="Галерея будет показывать результаты генерации.",
-            text_color=self.MUTED,
-            font=ctk.CTkFont(size=14),
-        ).grid(row=3, column=0, columnspan=3, pady=(0, 28))
+            empty, text="После генерации изображения появятся в этой галерее.",
+            text_color=self.MUTED, font=ctk.CTkFont(size=13),
+        ).pack()
 
 if __name__ == "__main__":
     FlowApp().mainloop()
