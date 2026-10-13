@@ -11,6 +11,7 @@ import threading
 
 PACKAGE_NAME = "AUTOMATIC1111 WebUI"
 REPOSITORY_URL = "https://github.com/AUTOMATIC1111/stable-diffusion-webui.git"
+STABLE_DIFFUSION_REPOSITORY = "https://github.com/w-e-w/stablediffusion.git"
 PACKAGE_DIR = "sd-webui"
 MARKER_NAME = ".flow-installed.json"
 
@@ -54,6 +55,15 @@ def find_git():
     git = shutil.which("git")
     if not git:
         raise InstallationError("Git не найден. Установите Git и перезапустите Flow.")
+    try:
+        result = subprocess.run(
+            [git, "--version"], capture_output=True, text=True,
+            timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise InstallationError(f"Не удалось проверить Git: {exc}") from exc
+    if result.returncode:
+        raise InstallationError("Git не запускается. Проверьте его установку и перезапустите Flow.")
     return git
 
 
@@ -119,6 +129,9 @@ class WebUIInstaller:
         flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         environment = os.environ.copy()
         environment["PYTHONUNBUFFERED"] = "1"
+        environment["GIT_TERMINAL_PROMPT"] = "0"
+        environment["WEBUI_LAUNCH_LIVE_OUTPUT"] = "1"
+        environment.setdefault("STABLE_DIFFUSION_REPO", STABLE_DIFFUSION_REPOSITORY)
         try:
             process = subprocess.Popen(
                 [str(part) for part in command],
@@ -177,7 +190,16 @@ class WebUIInstaller:
             self.log("Найден существующий репозиторий WebUI; продолжаю установку.")
         else:
             self.log(f"Клонирование {REPOSITORY_URL} в {directory}…")
-            self._run([git, "clone", "--progress", REPOSITORY_URL, directory], cwd=directory.parent)
+            try:
+                self._run([git, "clone", "--progress", REPOSITORY_URL, directory], cwd=directory.parent)
+            except (InstallationError, OSError):
+                # Only remove a directory created by this clone attempt.
+                if directory.exists() and directory.resolve().is_relative_to(packages_root().resolve()):
+                    try:
+                        shutil.rmtree(directory)
+                    except OSError:
+                        self.log("Не удалось удалить неполную загрузку; проверьте папку пакета.")
+                raise
 
         self._check_cancelled()
         if not venv_python(directory).is_file():
@@ -192,6 +214,14 @@ class WebUIInstaller:
             cwd=directory,
         )
         self._check_cancelled()
+        if os.name == "nt":
+            settings = directory / "webui.settings.bat"
+            if not settings.exists():
+                settings.write_text(
+                    f'@echo off\nset PYTHON="{venv_python(directory)}"\n'
+                    f'set STABLE_DIFFUSION_REPO={STABLE_DIFFUSION_REPOSITORY}\n',
+                    encoding="mbcs",
+                )
         (directory / MARKER_NAME).write_text(
             json.dumps({"name": PACKAGE_NAME, "repository": REPOSITORY_URL}, ensure_ascii=False),
             encoding="utf-8",
@@ -214,4 +244,6 @@ def launch_webui():
         flags = 0
     if not script.is_file():
         raise InstallationError(f"Файл запуска не найден: {script}")
-    subprocess.Popen(command, cwd=directory, creationflags=flags)
+    environment = os.environ.copy()
+    environment.setdefault("STABLE_DIFFUSION_REPO", STABLE_DIFFUSION_REPOSITORY)
+    subprocess.Popen(command, cwd=directory, creationflags=flags, env=environment)
