@@ -5,6 +5,8 @@ from tkinter import TclError
 import customtkinter as ctk
 from PIL import Image, ImageTk
 
+from discord_presence import DiscordPresence
+
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -57,10 +59,12 @@ class FlowApp(ctk.CTk):
         self.is_animating = False
         self.active_page = "Главная"
         self.nav_buttons = {}
+        self.discord_presence = DiscordPresence()
 
         self._build_sidebar()
         self._build_main_area()
         self.show_page("Главная")
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _load_logo(self):
         base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
@@ -248,6 +252,11 @@ class FlowApp(ctk.CTk):
             "Настройки": self._render_settings,
         }
         render_page[page_name](body)
+        self.discord_presence.set_page(page_name)
+
+    def _on_close(self):
+        self.discord_presence.close()
+        self.destroy()
 
     def _card(self, parent):
         return ctk.CTkFrame(
