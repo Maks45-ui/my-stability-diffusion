@@ -164,7 +164,7 @@ fn progress(app: &AppHandle, task_id: &str, file_name: &str, copied: u64, total:
         kind: "download", phase: "dependencies", message: file_name.to_owned(),
         percent: if total > 0 { Some((copied.saturating_mul(100) / total).min(100) as u8) } else { None },
         bytes_per_second: speed, task_id: Some(task_id.to_owned()),
-        bytes_downloaded: Some(copied), total_bytes: Some(total),
+        bytes_downloaded: Some(copied), total_bytes: Some(total), url: None,
     });
 }
 
@@ -264,7 +264,7 @@ pub(crate) async fn download_model(app: AppHandle, state: State<'_, Arc<Download
         control.running.store(false, Ordering::SeqCst);
         emit_task(&app, TaskEvent {
             kind: "download", phase, message, percent: None, bytes_per_second: None,
-            task_id: Some(task_id), bytes_downloaded: None, total_bytes: None,
+            task_id: Some(task_id), bytes_downloaded: None, total_bytes: None, url: None,
         });
     });
     Ok(())

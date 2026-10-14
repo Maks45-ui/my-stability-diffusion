@@ -255,8 +255,9 @@ function renderPackages(state: AppState): void {
     const icon = make("div", "package-icon", "A");
     const details = make("div", "package-details");
     details.append(make("h3", "", item.name), make("p", "", `${item.version} · Stable Diffusion`), make("small", "", item.path));
-    const badge = make("span", "package-state", item.stopping ? "● Останавливается" : item.running ? "● Запущен" : item.stopped ? "● Остановлен" : "● Готов");
-    badge.dataset.state = item.stopping ? "stopping" : item.running ? "running" : item.stopped ? "stopped" : "ready";
+    if (item.readyUrl) details.append(make("small", "package-url", item.readyUrl));
+    const badge = make("span", "package-state", item.stopping ? "● Останавливается" : item.readyUrl ? "● Запущен" : item.running ? "● Запускается" : item.stopped ? "● Остановлен" : "● Готов");
+    badge.dataset.state = item.stopping ? "stopping" : item.readyUrl ? "running" : item.running ? "starting" : item.stopped ? "stopped" : "ready";
     card.append(icon, details, badge);
     const actions = make("div", "package-actions");
     const launch = make("button", "primary-button", "Запустить");
@@ -277,6 +278,14 @@ function renderPackages(state: AppState): void {
         notify(message(error));
         await refreshState();
       }
+    });
+    const open = make("button", "secondary-button", "Открыть WebUI");
+    open.type = "button";
+    open.disabled = !item.readyUrl || item.stopping;
+    if (item.readyUrl) open.title = item.readyUrl;
+    open.addEventListener("click", async () => {
+      try { await window.flow.openWebUI(); }
+      catch (error) { notify(message(error)); }
     });
     const stop = make("button", "secondary-button package-stop", "Остановить");
     stop.type = "button";
@@ -302,7 +311,7 @@ function renderPackages(state: AppState): void {
     settings.type = "button";
     settings.prepend(make("span", "package-settings-icon", "⚙"));
     settings.addEventListener("click", () => void openWebuiSettings());
-    actions.append(launch, stop, settings);
+    actions.append(launch, open, stop, settings);
     card.append(actions);
     packageList.append(card);
   }
@@ -480,7 +489,11 @@ function onTask(event: TaskEvent): void {
     return;
   }
   if (event.kind === "launch") {
-    if (event.phase === "running") setConsoleStatus("WebUI работает", "running");
+    if (event.phase === "starting") setConsoleStatus("Запуск WebUI", "running");
+    if (event.phase === "ready" && event.url) {
+      setConsoleStatus("WebUI запущен", "running");
+      void refreshState();
+    }
     if (event.phase === "stopping") setConsoleStatus("Остановка WebUI", "running");
     if (event.phase === "done" || event.phase === "error") {
       stoppingWebui = false;

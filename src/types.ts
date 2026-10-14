@@ -1,5 +1,5 @@
 export type Page = "home" | "gallery" | "models" | "settings";
-export type TaskPhase = "idle" | "checking" | "cloning" | "venv" | "dependencies" | "running" | "stopping" | "log" | "paused" | "done" | "error" | "cancelled";
+export type TaskPhase = "idle" | "checking" | "cloning" | "venv" | "dependencies" | "starting" | "ready" | "running" | "stopping" | "log" | "paused" | "done" | "error" | "cancelled";
 
 export interface PackageInfo {
   name: string;
@@ -8,6 +8,7 @@ export interface PackageInfo {
   running: boolean;
   stopping: boolean;
   stopped: boolean;
+  readyUrl: string | null;
 }
 
 export interface AppState {
@@ -51,6 +52,7 @@ export interface TaskEvent {
   kind: "install" | "launch" | "download";
   phase: TaskPhase;
   message: string;
+  url?: string;
   percent?: number;
   bytesPerSecond?: number;
   taskId?: string;
@@ -66,6 +68,7 @@ export interface FlowAPI {
   cancelInstall(): Promise<void>;
   launchWebUI(): Promise<void>;
   stopWebUI(): Promise<void>;
+  openWebUI(): Promise<void>;
   getWebUIArguments(): Promise<string[]>;
   saveWebUIArguments(argumentsList: string[]): Promise<string[]>;
   listGalleryImages(): Promise<GalleryImage[]>;

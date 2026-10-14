@@ -37,6 +37,7 @@ struct PackageInfo {
     running: bool,
     stopping: bool,
     stopped: bool,
+    ready_url: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -45,6 +46,8 @@ pub(crate) struct TaskEvent {
     pub kind: &'static str,
     pub phase: &'static str,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub percent: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -126,6 +129,7 @@ fn get_state(app: AppHandle, webui: State<'_, installer::WebuiControl>) -> Resul
             running: webui.is_running(),
             stopping: webui.is_stopping(),
             stopped: webui.was_stopped(),
+            ready_url: webui.ready_url(),
         }]
     } else {
         Vec::new()
@@ -195,6 +199,7 @@ fn set_page(page: String) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(Arc::new(installer::InstallControl::default()))
         .manage(installer::WebuiControl::default())
         .manage(Arc::new(civitai::DownloadControl::default()))
@@ -210,6 +215,7 @@ pub fn run() {
             installer::cancel_install,
             installer::launch_web_ui,
             installer::stop_web_ui,
+            installer::open_web_ui,
             civitai::search_models,
             civitai::download_model,
             civitai::pause_download,

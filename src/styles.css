@@ -138,6 +138,8 @@ h1, h2, h3, p { margin: 0; }
 .package-state { color: var(--positive); background: color-mix(in srgb, var(--positive) 14%, transparent); padding: 6px 8px; border-radius: 8px; font-size: 10px; white-space: nowrap; }
 .package-state[data-state="stopped"] { color: var(--muted); background: var(--surface); }
 .package-state[data-state="stopping"] { color: var(--accent); background: var(--accent-soft); }
+.package-state[data-state="starting"] { color: var(--accent); background: var(--accent-soft); }
+.package-url { color: var(--accent) !important; }
 .package-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 9px; margin-top: 8px; }
 .package-actions button { flex: 1 1 105px; min-height: 37px; }
 .package-stop { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }

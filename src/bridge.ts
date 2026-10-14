@@ -10,6 +10,7 @@ export const flowApi: FlowAPI = {
   cancelInstall: () => invoke<void>("cancel_install"),
   launchWebUI: () => invoke<void>("launch_web_ui"),
   stopWebUI: () => invoke<void>("stop_web_ui"),
+  openWebUI: () => invoke<void>("open_web_ui"),
   getWebUIArguments: () => invoke<string[]>("get_webui_arguments"),
   saveWebUIArguments: (argumentsList: string[]) => invoke<string[]>("save_webui_arguments", { arguments: argumentsList }),
   listGalleryImages: () => invoke<GalleryImage[]>("list_gallery_images"),
