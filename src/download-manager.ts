@@ -159,7 +159,7 @@ export class DownloadManager {
   }
 
   private makeCard(item: DownloadItem): HTMLElement {
-    const card = node("article", "download-card");
+    const card = node("article", "download-card glass-surface");
     card.dataset.id = item.id;
     const icon = node("span", "download-card-icon", item.modelType.toLowerCase().includes("lora") ? "✦" : "◈");
     icon.setAttribute("aria-hidden", "true");

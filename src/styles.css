@@ -36,7 +36,9 @@ html, body, .sidebar, .main, .topbar, .panel, .stat-card, .model-card,
 .theme-toggle, .nav-item, .badge, .package-card, .file-select, .theme-option {
   transition: background-color .25s ease, color .25s ease, border-color .25s ease, box-shadow .25s ease;
 }
-html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+html, body { margin: 0; min-height: 100%; color: var(--text); }
+html { background: var(--bg); }
+body { background: radial-gradient(circle at 82% 12%, var(--main-glow), transparent 38%), radial-gradient(circle at 8% 86%, var(--ambient-secondary), transparent 44%), var(--bg); }
 button, input, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: default; opacity: .55; }
@@ -66,7 +68,7 @@ img { display: block; }
 .sidebar-bottom { margin: 18px 6px 0; padding: 15px 9px 0; min-height: 33px; display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; }
 .online-dot { width: 8px; height: 8px; flex: 0 0 auto; background: var(--positive); border-radius: 50%; box-shadow: 0 0 12px var(--positive); }
 
-.main { min-width: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; background: radial-gradient(circle at 98% 6%, var(--main-glow), transparent 34%), var(--bg); }
+.main { min-width: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; background: transparent; }
 .topbar { min-height: 82px; flex: 0 0 auto; border-bottom: 1px solid var(--line); padding: 0 34px; display: flex; align-items: center; justify-content: space-between; }
 .topbar-brand, .topbar-actions { display: flex; align-items: center; }
 .topbar-brand { gap: 12px; }

@@ -6,6 +6,7 @@
   <title>Flow</title>
   <link rel="stylesheet" href="/src/themes.css" />
   <link rel="stylesheet" href="/src/styles.css" />
+  <link rel="stylesheet" href="/src/glass.css" />
 </head>
 <body>
   <div class="splash-screen" id="splash-screen" role="status" aria-label="Запуск Flow">
@@ -14,7 +15,7 @@
     <p>Творчество начинается здесь</p>
   </div>
   <div class="app-shell" id="app-shell">
-    <aside class="sidebar" id="sidebar" aria-label="Навигация">
+    <aside class="sidebar glass-surface" id="sidebar" aria-label="Навигация">
       <div class="sidebar-top">
         <button class="icon-button menu-toggle" id="menu-toggle" aria-label="Свернуть меню" title="Свернуть меню">☰</button>
         <div class="sidebar-brand"><img src="/assets/logo.png" alt="" /><span>Flow</span></div>
@@ -38,28 +39,28 @@
       <div class="content">
         <section class="page active" id="page-home" aria-labelledby="home-title">
           <div class="page-heading"><div><span class="eyebrow">РАБОЧЕЕ ПРОСТРАНСТВО</span><h1 id="home-title">Добро пожаловать в Flow</h1><p>Управляйте пакетами, моделями и творческим процессом в одном месте.</p></div><span class="page-symbol">✦</span></div>
-          <div class="stat-row"><div class="stat-card"><span class="stat-icon">▣</span><div><span>Установлено пакетов</span><strong id="package-count">0</strong></div></div><div class="stat-card"><span class="stat-icon">◈</span><div><span>Каталог моделей</span><strong>Civitai</strong></div></div><div class="stat-card"><span class="stat-icon">◉</span><div><span>Статус</span><strong id="system-status">Готов к работе</strong></div></div></div>
+          <div class="stat-row"><div class="stat-card glass-surface"><span class="stat-icon">▣</span><div><span>Установлено пакетов</span><strong id="package-count">0</strong></div></div><div class="stat-card glass-surface"><span class="stat-icon">◈</span><div><span>Каталог моделей</span><strong>Civitai</strong></div></div><div class="stat-card glass-surface"><span class="stat-icon">◉</span><div><span>Статус</span><strong id="system-status">Готов к работе</strong></div></div></div>
           <div class="home-grid">
-            <section class="panel library-panel"><div class="panel-heading"><div><span class="eyebrow">ВАША БИБЛИОТЕКА</span><h2>Установленные пакеты</h2></div><span class="badge" id="package-badge">0 пакетов</span></div><div id="package-list" class="package-list"></div></section>
-            <section class="panel add-panel"><div class="add-art"><span>＋</span></div><div class="add-copy"><span class="eyebrow">НОВЫЕ ВОЗМОЖНОСТИ</span><h2>Новый пакет</h2><p>Установите AUTOMATIC1111 WebUI в отдельное окружение. Flow покажет каждый шаг установки.</p></div><button class="primary-button" id="add-package">Добавить пакет <span>→</span></button></section>
+            <section class="panel glass-surface library-panel"><div class="panel-heading"><div><span class="eyebrow">ВАША БИБЛИОТЕКА</span><h2>Установленные пакеты</h2></div><span class="badge" id="package-badge">0 пакетов</span></div><div id="package-list" class="package-list"></div></section>
+            <section class="panel glass-surface add-panel"><div class="add-art"><span>＋</span></div><div class="add-copy"><span class="eyebrow">НОВЫЕ ВОЗМОЖНОСТИ</span><h2>Новый пакет</h2><p>Установите AUTOMATIC1111 WebUI в отдельное окружение. Flow покажет каждый шаг установки.</p></div><button class="primary-button" id="add-package">Добавить пакет <span>→</span></button></section>
           </div>
         </section>
 
         <section class="page" id="page-gallery" aria-labelledby="gallery-title">
           <div class="page-heading"><div><span class="eyebrow">ТВОРЧЕСТВО</span><h1 id="gallery-title">Галерея</h1><p>Ваша коллекция изображений.</p></div><span class="page-symbol">▦</span></div>
-          <div class="panel gallery-panel"><div class="gallery-tiles"><div>✦</div><div>◈</div><div>✧</div></div><div class="empty-copy"><span class="empty-icon">▧</span><h2>Здесь пока нет изображений</h2><p>После генерации изображения появятся в этой галерее.</p></div></div>
+          <div class="panel glass-surface gallery-panel"><div class="gallery-tiles"><div>✦</div><div>◈</div><div>✧</div></div><div class="empty-copy"><span class="empty-icon">▧</span><h2>Здесь пока нет изображений</h2><p>После генерации изображения появятся в этой галерее.</p></div></div>
         </section>
 
         <section class="page" id="page-models" aria-labelledby="models-title">
           <div class="page-heading"><div><span class="eyebrow">КАТАЛОГ CIVITAI</span><h1 id="models-title">Загрузка моделей</h1><p>Находите модели, смотрите примеры и загружайте файлы.</p></div><span class="page-symbol">↓</span></div>
           <div class="search-row"><label class="search-field"><span>⌕</span><input id="model-search" type="search" placeholder="Поиск по названию или ID модели" autocomplete="off" aria-label="Поиск моделей" /></label><button class="primary-button search-button" id="search-button">Найти</button></div>
-          <section class="panel downloads-panel" aria-labelledby="downloads-title"><div class="panel-heading"><div><span class="eyebrow">МЕНЕДЖЕР МОДЕЛЕЙ</span><h2 id="downloads-title">Ваши загрузки</h2></div><span class="badge" id="download-count">0 файлов</span></div><div class="download-list" id="download-list" aria-live="polite"></div></section>
+          <section class="panel glass-surface downloads-panel" aria-labelledby="downloads-title"><div class="panel-heading"><div><span class="eyebrow">МЕНЕДЖЕР МОДЕЛЕЙ</span><h2 id="downloads-title">Ваши загрузки</h2></div><span class="badge" id="download-count">0 файлов</span></div><div class="download-list" id="download-list" aria-live="polite"></div></section>
           <div class="catalog-status" id="catalog-status">Откройте каталог или введите запрос.</div><div class="model-grid" id="model-grid"></div>
         </section>
 
         <section class="page" id="page-settings" aria-labelledby="settings-title">
           <div class="page-heading"><div><span class="eyebrow">ПЕРСОНАЛИЗАЦИЯ</span><h1 id="settings-title">Настройки</h1><p>Основные параметры Flow и доступ к каталогу моделей.</p></div><span class="page-symbol">⚙</span></div>
-          <div class="panel settings-panel">
+          <div class="panel glass-surface settings-panel">
             <div class="setting-row"><div><h2>Оформление</h2><p>Выберите палитру Flow. Изменения применяются сразу.</p></div><span class="setting-value" id="theme-state">Тёмная</span></div>
             <div class="theme-picker" id="theme-picker">
               <section class="theme-group" aria-labelledby="theme-standard-title"><div class="theme-group-heading"><h3 id="theme-standard-title">Стандартные</h3><p>Привычные режимы на каждый день</p></div><div class="theme-options" id="theme-standard"></div></section>
@@ -74,12 +75,12 @@
           </div>
         </section>
       </div>
-      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+      <div class="toast glass-surface" id="toast" role="status" aria-live="polite"></div>
     </main>
   </div>
 
-  <dialog class="modal" id="install-dialog"><div class="modal-header"><div><span class="eyebrow">УСТАНОВКА ПАКЕТА</span><h2>AUTOMATIC1111 WebUI</h2></div><button class="icon-button" id="close-install" aria-label="Закрыть">×</button></div><p>Flow проверит Git и Python 3.10, загрузит WebUI и создаст отдельное окружение.</p><div class="install-location"><label for="install-dir-dialog">Папка установки</label><div class="path-control"><input id="install-dir-dialog" type="text" readonly placeholder="Выберите папку" /><button id="browse-install-dialog" class="secondary-button" type="button">Обзор...</button></div><small>Пакет будет установлен в подпапку sd-webui.</small></div><div class="install-step" id="install-step">Готово к установке</div><pre class="log-output" id="install-log" aria-live="polite"></pre><div class="modal-actions"><button class="secondary-button" id="cancel-install">Отменить</button><button class="primary-button" id="start-install">Начать установку</button></div></dialog>
-  <dialog class="modal image-modal" id="image-dialog"><button class="icon-button image-close" id="close-image" aria-label="Закрыть">×</button><img id="full-image" alt="Пример изображения модели" /></dialog>
+  <dialog class="modal glass-surface" id="install-dialog"><div class="modal-header"><div><span class="eyebrow">УСТАНОВКА ПАКЕТА</span><h2>AUTOMATIC1111 WebUI</h2></div><button class="icon-button" id="close-install" aria-label="Закрыть">×</button></div><p>Flow проверит Git и Python 3.10, загрузит WebUI и создаст отдельное окружение.</p><div class="install-location"><label for="install-dir-dialog">Папка установки</label><div class="path-control"><input id="install-dir-dialog" type="text" readonly placeholder="Выберите папку" /><button id="browse-install-dialog" class="secondary-button" type="button">Обзор...</button></div><small>Пакет будет установлен в подпапку sd-webui.</small></div><div class="install-step" id="install-step">Готово к установке</div><pre class="log-output" id="install-log" aria-live="polite"></pre><div class="modal-actions"><button class="secondary-button" id="cancel-install">Отменить</button><button class="primary-button" id="start-install">Начать установку</button></div></dialog>
+  <dialog class="modal image-modal glass-surface" id="image-dialog"><button class="icon-button image-close" id="close-image" aria-label="Закрыть">×</button><img id="full-image" alt="Пример изображения модели" /></dialog>
   <script src="/src/renderer.ts" type="module"></script>
 </body>
 </html>

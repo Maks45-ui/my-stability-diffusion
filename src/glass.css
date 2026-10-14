@@ -1,0 +1,122 @@
+/* One material for panels, cards, navigation, and dialogs. Palette values live in themes.css. */
+.glass-surface {
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  border-radius: 22px;
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-edge);
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+  backdrop-filter: blur(22px) saturate(145%);
+  transition: background-color .28s ease, border-color .28s ease, box-shadow .28s ease, transform .22s ease;
+}
+
+.glass-surface::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(155deg, var(--glass-sheen), transparent 40%, rgba(255, 255, 255, .035) 72%, transparent);
+  opacity: .56;
+  pointer-events: none;
+  transition: opacity .3s ease;
+}
+
+.glass-surface:not(.sidebar):hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--glass-border));
+  box-shadow: var(--glass-hover-shadow), inset 0 1px 0 var(--glass-edge);
+}
+.glass-surface:hover::before { opacity: .9; }
+
+.sidebar.glass-surface,
+.panel.glass-surface,
+.stat-card.glass-surface,
+.package-card.glass-surface,
+.model-card.glass-surface,
+.download-card.glass-surface { position: relative; }
+
+.sidebar.glass-surface {
+  flex-shrink: 0;
+  border-radius: 0 28px 28px 0;
+  border-left: 0;
+  border-top: 0;
+  border-bottom: 0;
+  background: var(--glass-sidebar-bg);
+  -webkit-backdrop-filter: blur(30px) saturate(150%);
+  backdrop-filter: blur(30px) saturate(150%);
+}
+.sidebar.glass-surface::before { opacity: .35; }
+.sidebar.glass-surface:hover::before { opacity: .55; }
+
+.topbar {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(18px) saturate(140%);
+}
+
+.stat-card.glass-surface,
+.package-card.glass-surface,
+.download-card.glass-surface,
+.theme-option.glass-surface { border-radius: 18px; }
+.package-card.glass-surface,
+.model-card.glass-surface,
+.download-card.glass-surface {
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+  backdrop-filter: blur(18px) saturate(135%);
+}
+.theme-option.glass-surface {
+  -webkit-backdrop-filter: blur(12px) saturate(130%);
+  backdrop-filter: blur(12px) saturate(130%);
+}
+.download-card.glass-surface[data-status="downloading"] { border-color: var(--accent); }
+.download-card.glass-surface[data-status="completed"] { border-color: var(--success); }
+.theme-option.glass-surface { border-radius: 16px; }
+.theme-option.selected.glass-surface,
+.theme-option.selected.glass-surface:hover {
+  border-color: var(--accent);
+  box-shadow: var(--glass-shadow), 0 0 0 1px var(--accent), inset 0 1px 0 var(--glass-edge);
+}
+
+.add-panel.glass-surface {
+  background: radial-gradient(circle at 88% 10%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 49%), var(--glass-bg);
+}
+
+.modal.glass-surface {
+  border-radius: 26px;
+  background: var(--glass-modal-bg);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  backdrop-filter: blur(28px) saturate(150%);
+}
+.modal.glass-surface[open] { animation: glass-dialog-in .26s cubic-bezier(.2, .8, .2, 1) both; }
+.modal::backdrop {
+  background: rgba(6, 10, 19, .46);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+html[data-theme="light"] .modal::backdrop { background: rgba(45, 65, 93, .23); }
+
+.toast.glass-surface {
+  border-radius: 16px;
+  background: var(--glass-modal-bg);
+  color: var(--text);
+  transition: opacity .2s ease, transform .2s ease, background-color .28s ease, border-color .28s ease, box-shadow .28s ease;
+}
+
+@keyframes glass-dialog-in {
+  from { opacity: 0; transform: translateY(12px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-surface { background: var(--panel); }
+  .sidebar.glass-surface { background: var(--sidebar); }
+  .modal.glass-surface { background: var(--modal-bg); }
+  .toast.glass-surface { background: var(--toast-bg); }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass-surface, .topbar { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--panel); }
+  .sidebar.glass-surface { background: var(--sidebar); }
+  .modal.glass-surface { background: var(--modal-bg); }
+}

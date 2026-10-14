@@ -55,7 +55,7 @@ export class ThemeController {
 
   private renderOptions(): void {
     for (const option of OPTIONS) {
-      const button = makeElement("button", "theme-option");
+      const button = makeElement("button", "theme-option glass-surface");
       button.type = "button";
       button.dataset.themeOption = option.id;
       button.setAttribute("aria-pressed", "false");

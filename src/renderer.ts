@@ -116,7 +116,7 @@ function renderPackages(state: AppState): void {
     return;
   }
   for (const item of state.packages) {
-    const card = make("article", "package-card");
+    const card = make("article", "package-card glass-surface");
     const icon = make("div", "package-icon", "A");
     const details = make("div", "package-details");
     details.append(make("h3", "", item.name), make("p", "", `${item.version} · Stable Diffusion`), make("small", "", item.path));
@@ -170,7 +170,7 @@ async function showImage(url: string): Promise<void> {
 }
 
 function renderModel(model: ModelSummary): HTMLElement {
-  const card = make("article", "model-card");
+  const card = make("article", "model-card glass-surface");
   const gallery = make("div", "model-gallery");
   for (const url of model.images) {
     const button = make("button", "model-image");
