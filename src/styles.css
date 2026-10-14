@@ -168,8 +168,24 @@ h1, h2, h3, p { margin: 0; }
 .secondary-button:hover:not(:disabled) { background: var(--accent-soft); transform: translateY(-1px); }
 
 .gallery-panel { min-height: 430px; padding: 24px; }
-.gallery-tiles { display: grid; grid-template-columns: repeat(3,1fr); gap: 13px; }
-.gallery-tiles div { height: 150px; display: grid; place-items: center; border: 1px dashed var(--line); border-radius: 13px; background: var(--gallery-tile); color: var(--accent); font-size: 38px; }
+.gallery-heading { margin-bottom: 20px; }
+.gallery-actions { display: flex; align-items: center; gap: 10px; }
+.gallery-refresh { min-height: 34px; padding: 0 12px; font-size: 11px; }
+.gallery-refresh:disabled { opacity: .6; cursor: wait; }
+.gallery-status { padding: 32px 12px; color: var(--muted); font-size: 12px; text-align: center; }
+.gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
+.gallery-grid[hidden], .gallery-empty[hidden], .gallery-status[hidden] { display: none; }
+.gallery-card { position: relative; display: block; min-width: 0; aspect-ratio: 1 / 1.08; padding: 0; overflow: hidden; border: 1px solid var(--glass-border); border-radius: 16px; background: var(--gallery-tile); color: var(--text); text-align: left; cursor: pointer; }
+.gallery-card:hover { transform: translateY(-3px); }
+.gallery-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.gallery-thumbnail { width: 100%; height: 100%; display: block; object-fit: cover; transition: transform .3s ease; }
+.gallery-card:hover .gallery-thumbnail { transform: scale(1.035); }
+.gallery-card.image-error .gallery-thumbnail { display: none; }
+.gallery-card.image-error::after { content: "Превью недоступно"; position: absolute; inset: 35% 10% auto; color: var(--muted); font-size: 11px; text-align: center; }
+.gallery-caption { position: absolute; right: 0; bottom: 0; left: 0; display: flex; align-items: center; gap: 7px; padding: 23px 10px 10px; background: linear-gradient(transparent, rgba(0,0,0,.78)); color: #fff; font-size: 10px; }
+.gallery-kind { flex: 0 0 auto; padding: 3px 6px; border-radius: 6px; background: var(--accent); color: var(--on-accent); font-weight: 700; }
+.gallery-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gallery-date { flex: 0 0 auto; margin-left: auto; opacity: .8; }
 .empty-copy { text-align: center; margin: 51px auto 0; }
 .empty-icon { display: block; color: var(--accent); font-size: 38px; margin-bottom: 10px; }
 .empty-copy h2 { font-size: 18px; }
@@ -322,7 +338,7 @@ h1, h2, h3, p { margin: 0; }
 
 @media (max-width: 1080px) { .content { padding: 28px 25px; } .home-grid { grid-template-columns: minmax(0,1.3fr) minmax(260px,1fr); } .topbar-caption { display: none; } }
 @media (max-width: 950px) { .theme-toggle #theme-toggle-label { display: none; } }
-@media (max-width: 760px) { .app-shell { --sidebar-expanded-width: 72px; } .sidebar .sidebar-brand, .sidebar .nav-label, .sidebar .sidebar-bottom-label { display: none; } .sidebar .nav-item { justify-content: center; padding: 0; } .stat-row, .home-grid, .model-grid { grid-template-columns: 1fr; } .theme-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } .content { padding: 20px; } .gallery-tiles div { height: 90px; } }
+@media (max-width: 760px) { .app-shell { --sidebar-expanded-width: 72px; } .sidebar .sidebar-brand, .sidebar .nav-label, .sidebar .sidebar-bottom-label { display: none; } .sidebar .nav-item { justify-content: center; padding: 0; } .stat-row, .home-grid, .model-grid { grid-template-columns: 1fr; } .theme-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } .content { padding: 20px; } .gallery-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); } }
 @media (max-width: 520px) { .theme-options { grid-template-columns: 1fr; } .theme-group-heading { display: block; } .theme-group-heading p { margin-top: 4px; } .setting-row { align-items: flex-start; flex-wrap: wrap; } }
 @media (max-width: 520px) { .console-panel.glass-surface { right: 12px; bottom: 12px; width: calc(100vw - 24px); height: min(420px, calc(100dvh - 24px)); padding: 16px; } .console-heading { align-items: flex-start; } .console-heading h2 { font-size: 15px; } .console-actions { gap: 8px; } .console-footer { align-items: flex-start; flex-direction: column; } .console-launcher span { display: none; } .topbar-actions { gap: 8px; } }
 @media (max-width: 520px) { .webui-settings-modal { padding: 19px; } .webui-args-card.glass-surface { padding: 15px; } .webui-arg-entry { flex-direction: column; } .webui-settings-footer { align-items: stretch; flex-direction: column; } .webui-settings-footer .modal-actions { justify-content: flex-end; } }

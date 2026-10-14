@@ -15,6 +15,13 @@ export interface AppState {
   installationDir: string;
 }
 
+export interface GalleryImage {
+  path: string;
+  fileName: string;
+  kind: "txt2img" | "img2img";
+  modifiedAt: number;
+}
+
 export interface ModelFile {
   name: string;
   downloadUrl: string;
@@ -58,6 +65,7 @@ export interface FlowAPI {
   launchWebUI(): Promise<void>;
   getWebUIArguments(): Promise<string[]>;
   saveWebUIArguments(argumentsList: string[]): Promise<string[]>;
+  listGalleryImages(): Promise<GalleryImage[]>;
   searchModels(query: string): Promise<ModelSummary[]>;
   downloadModel(file: ModelFile, type: string, taskId: string, resume: boolean): Promise<void>;
   pauseDownload(): Promise<void>;

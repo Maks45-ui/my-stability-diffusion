@@ -1,8 +1,9 @@
 import { flowApi } from "./bridge";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { DownloadManager } from "./download-manager";
 import { startSplashScreen } from "./splash";
 import { ThemeController } from "./theme";
-import type { AppState, ModelSummary, Page, TaskEvent } from "./types";
+import type { AppState, GalleryImage, ModelSummary, Page, TaskEvent } from "./types";
 
 window.flow = flowApi;
 
@@ -29,6 +30,11 @@ const consoleToggle = element<HTMLButtonElement>("toggle-terminal");
 const consoleCancel = element<HTMLButtonElement>("cancel-terminal-install");
 const consoleStatus = element<HTMLElement>("console-status");
 const packageList = element<HTMLElement>("package-list");
+const galleryGrid = element<HTMLElement>("gallery-grid");
+const galleryEmpty = element<HTMLElement>("gallery-empty");
+const galleryStatus = element<HTMLElement>("gallery-status");
+const galleryCount = element<HTMLElement>("gallery-count");
+const galleryRefresh = element<HTMLButtonElement>("refresh-gallery");
 const modelGrid = element<HTMLElement>("model-grid");
 const catalogStatus = element<HTMLElement>("catalog-status");
 const searchInput = element<HTMLInputElement>("model-search");
@@ -47,6 +53,7 @@ new ThemeController(
 );
 let hasLoadedCatalog = false;
 let searchSequence = 0;
+let gallerySequence = 0;
 let debounceTimer: number | undefined;
 let toastTimer: number | undefined;
 let installing = false;
@@ -223,6 +230,7 @@ function showPage(page: Page): void {
     hasLoadedCatalog = true;
     void searchModels();
   }
+  if (page === "gallery") void refreshGallery();
 }
 
 function renderPackages(state: AppState): void {
@@ -296,10 +304,70 @@ const imageObserver = new IntersectionObserver((entries, observer) => {
 
 async function showImage(url: string): Promise<void> {
   const image = element<HTMLImageElement>("full-image");
+  image.onerror = null;
+  image.alt = "Пример изображения модели";
   image.removeAttribute("src");
   imageDialog.showModal();
   try { image.src = await window.flow.getPreview(url); }
   catch (error) { imageDialog.close(); notify(message(error)); }
+}
+
+function showGalleryImage(item: GalleryImage): void {
+  const image = element<HTMLImageElement>("full-image");
+  image.removeAttribute("src");
+  image.alt = item.fileName;
+  image.onerror = () => {
+    imageDialog.close();
+    notify("Не удалось открыть изображение. Обновите галерею и попробуйте снова.");
+  };
+  imageDialog.showModal();
+  image.src = convertFileSrc(item.path);
+}
+
+function renderGalleryImage(item: GalleryImage): HTMLElement {
+  const button = make("button", "gallery-card glass-surface");
+  button.type = "button";
+  button.title = item.fileName;
+  button.setAttribute("aria-label", `Открыть изображение ${item.fileName}`);
+  const image = make("img", "gallery-thumbnail");
+  image.alt = item.fileName;
+  image.loading = "lazy";
+  image.decoding = "async";
+  image.addEventListener("error", () => button.classList.add("image-error"));
+  image.src = convertFileSrc(item.path);
+  const caption = make("span", "gallery-caption");
+  caption.append(
+    make("span", "gallery-kind", item.kind === "txt2img" ? "txt2img" : "img2img"),
+    make("span", "gallery-file-name", item.fileName),
+    make("span", "gallery-date", item.modifiedAt ? new Date(item.modifiedAt).toLocaleDateString("ru-RU") : "")
+  );
+  button.append(image, caption);
+  button.addEventListener("click", () => showGalleryImage(item));
+  return button;
+}
+
+async function refreshGallery(): Promise<void> {
+  const sequence = ++gallerySequence;
+  galleryRefresh.disabled = true;
+  galleryStatus.hidden = false;
+  galleryStatus.textContent = "Ищем изображения WebUI…";
+  galleryEmpty.hidden = true;
+  galleryGrid.replaceChildren();
+  try {
+    const images = await window.flow.listGalleryImages();
+    if (sequence !== gallerySequence) return;
+    galleryCount.textContent = `${images.length} изображений`;
+    galleryStatus.hidden = true;
+    galleryEmpty.hidden = images.length > 0;
+    const fragment = document.createDocumentFragment();
+    for (const image of images) fragment.append(renderGalleryImage(image));
+    galleryGrid.append(fragment);
+  } catch (error) {
+    if (sequence !== gallerySequence) return;
+    galleryStatus.textContent = `Не удалось загрузить галерею: ${message(error)}`;
+  } finally {
+    if (sequence === gallerySequence) galleryRefresh.disabled = false;
+  }
 }
 
 function renderModel(model: ModelSummary): HTMLElement {
@@ -508,6 +576,7 @@ consoleCancel.addEventListener("click", async () => {
   catch (error) { consoleCancel.disabled = false; notify(message(error)); }
 });
 element<HTMLButtonElement>("close-image").addEventListener("click", () => imageDialog.close());
+galleryRefresh.addEventListener("click", () => void refreshGallery());
 element<HTMLButtonElement>("search-button").addEventListener("click", () => void searchModels());
 searchInput.addEventListener("input", () => {
   window.clearTimeout(debounceTimer);

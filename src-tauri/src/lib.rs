@@ -1,5 +1,6 @@
 mod civitai;
 mod discord;
+mod gallery;
 mod installer;
 mod paths;
 
@@ -190,6 +191,7 @@ pub fn run() {
             save_civitai_token,
             get_webui_arguments,
             save_webui_arguments,
+            gallery::list_gallery_images,
             set_page,
             installer::install_web_ui,
             installer::cancel_install,
