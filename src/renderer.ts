@@ -18,8 +18,10 @@ const nav = element<HTMLElement>("navigation");
 const toast = element<HTMLElement>("toast");
 const installDialog = element<HTMLDialogElement>("install-dialog");
 const imageDialog = element<HTMLDialogElement>("image-dialog");
-const log = element<HTMLElement>("install-log");
 const terminal = element<HTMLElement>("terminal-log");
+const consolePanel = element<HTMLElement>("console-panel");
+const consoleToggle = element<HTMLButtonElement>("toggle-terminal");
+const consoleCancel = element<HTMLButtonElement>("cancel-terminal-install");
 const consoleStatus = element<HTMLElement>("console-status");
 const packageList = element<HTMLElement>("package-list");
 const modelGrid = element<HTMLElement>("model-grid");
@@ -66,6 +68,23 @@ function queueLog(target: HTMLElement, message: string): void {
 function setConsoleStatus(label: string, state: "idle" | "running" | "done" | "error"): void {
   consoleStatus.textContent = label;
   consoleStatus.dataset.state = state;
+  consoleToggle.dataset.state = state;
+  consoleToggle.title = state === "running" ? `${label} — открыть логи` : "Открыть логи";
+}
+
+function setConsoleVisible(visible: boolean): void {
+  consolePanel.classList.toggle("visible", visible);
+  consolePanel.setAttribute("aria-hidden", String(!visible));
+  consolePanel.inert = !visible;
+  consoleToggle.setAttribute("aria-expanded", String(visible));
+  consoleToggle.title = visible ? "Скрыть логи" : "Открыть логи";
+}
+
+function setInstalling(value: boolean): void {
+  installing = value;
+  element<HTMLButtonElement>("start-install").disabled = value;
+  consoleCancel.hidden = !value;
+  consoleCancel.disabled = false;
 }
 
 function showInstallationDir(path: string): void {
@@ -152,13 +171,18 @@ function renderPackages(state: AppState): void {
     launch.type = "button";
     launch.disabled = item.running;
     launch.addEventListener("click", async () => {
+      setConsoleVisible(true);
+      setConsoleStatus("Запуск WebUI", "running");
+      queueLog(terminal, "[WebUI] Запуск...");
       try {
         await window.flow.launchWebUI();
-        notify("WebUI запускается. Логи доступны на главном экране.");
-        element<HTMLElement>("console-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
         await refreshState();
       }
-      catch (error) { notify(message(error)); }
+      catch (error) {
+        setConsoleStatus("Ошибка WebUI", "error");
+        queueLog(terminal, `[WebUI] ${message(error)}`);
+        notify(message(error));
+      }
     });
     const settings = make("button", "secondary-button", "Настроить");
     settings.type = "button";
@@ -268,15 +292,10 @@ function onTask(event: TaskEvent): void {
     queueLog(terminal, `[${event.kind === "install" ? "Установка" : "WebUI"}] ${event.message}`);
   }
   if (event.kind === "install") {
-    queueLog(log, event.message);
-    if (event.phase !== "log") {
-      element<HTMLElement>("install-step").textContent = event.phase === "done" ? "Установка завершена" : event.phase === "error" ? "Ошибка установки" : event.message.trim().slice(0, 120);
-    }
     if (["checking", "cloning", "venv", "dependencies"].includes(event.phase)) setConsoleStatus("Установка", "running");
     if (["done", "error", "cancelled"].includes(event.phase)) {
       setConsoleStatus(event.phase === "done" ? "Установлено" : event.phase === "cancelled" ? "Отменено" : "Ошибка установки", event.phase === "done" ? "done" : "error");
-      installing = false;
-      element<HTMLButtonElement>("start-install").disabled = false;
+      setInstalling(false);
       if (event.phase === "done") { notify("WebUI установлен."); void refreshState(); }
       else notify(event.message);
     }
@@ -337,25 +356,43 @@ menuToggle.addEventListener("click", () => {
     finishSidebarAnimation();
   }
 });
-element<HTMLButtonElement>("add-package").addEventListener("click", () => installDialog.showModal());
+element<HTMLButtonElement>("add-package").addEventListener("click", () => {
+  if (installing) setConsoleVisible(true);
+  else installDialog.showModal();
+});
 element<HTMLButtonElement>("close-install").addEventListener("click", () => installDialog.close());
 element<HTMLButtonElement>("start-install").addEventListener("click", async () => {
   if (installing) return;
   if (!installationDir) { notify("Сначала выберите папку установки."); return; }
-  installing = true;
-  pendingLogs.delete(log);
-  log.textContent = "";
-  element<HTMLButtonElement>("start-install").disabled = true;
+  setInstalling(true);
+  installDialog.close();
+  setConsoleVisible(true);
+  setConsoleStatus("Установка", "running");
+  queueLog(terminal, "[Установка] Начало установки AUTOMATIC1111 WebUI...");
   try { await window.flow.installWebUI(installationDir); }
-  catch (error) { installing = false; element<HTMLButtonElement>("start-install").disabled = false; notify(message(error)); }
+  catch (error) {
+    setInstalling(false);
+    setConsoleStatus("Ошибка установки", "error");
+    queueLog(terminal, `[Установка] ${message(error)}`);
+    notify(message(error));
+  }
+});
+consoleToggle.addEventListener("click", () => setConsoleVisible(!consolePanel.classList.contains("visible")));
+element<HTMLButtonElement>("close-terminal").addEventListener("click", () => {
+  setConsoleVisible(false);
+  consoleToggle.focus();
 });
 element<HTMLButtonElement>("clear-terminal").addEventListener("click", () => {
   pendingLogs.delete(terminal);
   terminalHasOutput = true;
   terminal.textContent = "";
 });
-element<HTMLButtonElement>("cancel-install").addEventListener("click", async () => {
-  if (installing) await window.flow.cancelInstall(); else installDialog.close();
+element<HTMLButtonElement>("cancel-install").addEventListener("click", () => installDialog.close());
+consoleCancel.addEventListener("click", async () => {
+  if (!installing) return;
+  consoleCancel.disabled = true;
+  try { await window.flow.cancelInstall(); }
+  catch (error) { consoleCancel.disabled = false; notify(message(error)); }
 });
 element<HTMLButtonElement>("close-image").addEventListener("click", () => imageDialog.close());
 element<HTMLButtonElement>("search-button").addEventListener("click", () => void searchModels());

@@ -33,7 +33,7 @@
     <main class="main">
       <header class="topbar">
         <div class="topbar-brand"><img src="/assets/logo.png" alt="Логотип Flow" /><div><strong>Flow</strong><span>AI Manager</span></div></div>
-        <div class="topbar-actions"><span class="topbar-caption">Ваше пространство для творчества</span><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Выбрать тему оформления" title="Выбрать тему оформления"><span class="theme-toggle-icon" id="theme-toggle-icon" aria-hidden="true">☾</span><span id="theme-toggle-label">Тёмная</span></button><span class="avatar">F</span></div>
+        <div class="topbar-actions"><span class="topbar-caption">Ваше пространство для творчества</span><button class="console-launcher" id="toggle-terminal" type="button" aria-controls="console-panel" aria-expanded="false" title="Открыть логи"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></svg><span>Логи</span><i class="console-launcher-dot" aria-hidden="true"></i></button><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Выбрать тему оформления" title="Выбрать тему оформления"><span class="theme-toggle-icon" id="theme-toggle-icon" aria-hidden="true">☾</span><span id="theme-toggle-label">Тёмная</span></button><span class="avatar">F</span></div>
       </header>
 
       <div class="content">
@@ -44,11 +44,6 @@
             <section class="panel glass-surface library-panel"><div class="panel-heading"><div><span class="eyebrow">ВАША БИБЛИОТЕКА</span><h2>Установленные пакеты</h2></div><span class="badge" id="package-badge">0 пакетов</span></div><div id="package-list" class="package-list"></div></section>
             <section class="panel glass-surface add-panel"><div class="add-art"><span>＋</span></div><div class="add-copy"><span class="eyebrow">НОВЫЕ ВОЗМОЖНОСТИ</span><h2>Новый пакет</h2><p>Установите AUTOMATIC1111 WebUI в отдельное окружение. Flow покажет каждый шаг установки.</p></div><button class="primary-button" id="add-package">Добавить пакет <span>→</span></button></section>
           </div>
-          <section class="panel glass-surface console-panel" id="console-panel" aria-labelledby="console-title">
-            <div class="console-heading"><div><span class="eyebrow">ПРОЦЕССЫ FLOW</span><h2 id="console-title">Консоль установки и запуска</h2></div><div class="console-actions"><span class="console-status" id="console-status" data-state="idle">Ожидание</span><button class="secondary-button console-clear" id="clear-terminal" type="button">Очистить</button></div></div>
-            <pre class="log-output console-output" id="terminal-log" role="log" aria-live="polite">Логи установки и запуска WebUI появятся здесь.
-</pre>
-          </section>
         </section>
 
         <section class="page" id="page-gallery" aria-labelledby="gallery-title">
@@ -84,7 +79,14 @@
     </main>
   </div>
 
-  <dialog class="modal glass-surface" id="install-dialog"><div class="modal-header"><div><span class="eyebrow">УСТАНОВКА ПАКЕТА</span><h2>AUTOMATIC1111 WebUI</h2></div><button class="icon-button" id="close-install" aria-label="Закрыть">×</button></div><p>Flow проверит Git и Python 3.10, загрузит WebUI и создаст отдельное окружение.</p><div class="install-location"><label for="install-dir-dialog">Папка установки</label><div class="path-control"><input id="install-dir-dialog" type="text" readonly placeholder="Выберите папку" /><button id="browse-install-dialog" class="secondary-button" type="button">Обзор...</button></div><small>Пакет будет установлен в подпапку sd-webui.</small></div><div class="install-step" id="install-step">Готово к установке</div><pre class="log-output" id="install-log" aria-live="polite"></pre><div class="modal-actions"><button class="secondary-button" id="cancel-install">Отменить</button><button class="primary-button" id="start-install">Начать установку</button></div></dialog>
+  <section class="glass-surface console-panel" id="console-panel" role="region" aria-labelledby="console-title" aria-hidden="true" inert>
+    <div class="console-heading"><div><span class="eyebrow">ПРОЦЕССЫ FLOW</span><h2 id="console-title">Консоль установки и запуска</h2></div><div class="console-actions"><span class="console-status" id="console-status" data-state="idle">Ожидание</span><button class="icon-button console-close" id="close-terminal" type="button" aria-label="Скрыть консоль" title="Скрыть консоль">×</button></div></div>
+    <pre class="log-output console-output" id="terminal-log" role="log" aria-live="polite">Логи установки и запуска WebUI появятся здесь.
+</pre>
+    <div class="console-footer"><span>Консоль можно скрыть — процесс продолжится.</span><div class="console-footer-actions"><button class="secondary-button console-clear" id="clear-terminal" type="button">Очистить</button><button class="secondary-button console-cancel" id="cancel-terminal-install" type="button" hidden>Отменить установку</button></div></div>
+  </section>
+
+  <dialog class="modal glass-surface" id="install-dialog"><div class="modal-header"><div><span class="eyebrow">УСТАНОВКА ПАКЕТА</span><h2>AUTOMATIC1111 WebUI</h2></div><button class="icon-button" id="close-install" aria-label="Закрыть">×</button></div><p>Flow проверит Git и Python 3.10, загрузит WebUI и создаст отдельное окружение. Логи откроются при запуске установки.</p><div class="install-location"><label for="install-dir-dialog">Папка установки</label><div class="path-control"><input id="install-dir-dialog" type="text" readonly placeholder="Выберите папку" /><button id="browse-install-dialog" class="secondary-button" type="button">Обзор...</button></div><small>Пакет будет установлен в подпапку sd-webui.</small></div><div class="modal-actions"><button class="secondary-button" id="cancel-install">Отменить</button><button class="primary-button" id="start-install">Начать установку</button></div></dialog>
   <dialog class="modal image-modal glass-surface" id="image-dialog"><button class="icon-button image-close" id="close-image" aria-label="Закрыть">×</button><img id="full-image" alt="Пример изображения модели" /></dialog>
   <script src="/src/renderer.ts" type="module"></script>
 </body>
