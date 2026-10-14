@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Flow</title>
+  <link rel="stylesheet" href="/src/themes.css" />
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
@@ -20,10 +21,10 @@
       </div>
       <nav class="navigation" id="navigation">
         <span class="nav-indicator" id="nav-indicator" aria-hidden="true"></span>
-        <button class="nav-item active" data-page="home" title="Главная"><span class="nav-icon">⌂</span><span class="nav-label">Главная</span></button>
-        <button class="nav-item" data-page="gallery" title="Галерея"><span class="nav-icon">▦</span><span class="nav-label">Галерея</span></button>
-        <button class="nav-item" data-page="models" title="Загрузка моделей"><span class="nav-icon">↓</span><span class="nav-label">Загрузка моделей</span></button>
-        <button class="nav-item settings-nav" data-page="settings" title="Настройки"><span class="nav-icon">⚙</span><span class="nav-label">Настройки</span></button>
+        <button class="nav-item active" data-page="home" title="Главная"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 21v-7h6v7"/></svg></span><span class="nav-label">Главная</span></button>
+        <button class="nav-item" data-page="gallery" title="Галерея"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 16-5-5-4 4-2-2-7 7"/></svg></span><span class="nav-label">Галерея</span></button>
+        <button class="nav-item" data-page="models" title="Загрузка моделей"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v11m0 0 4-4m-4 4-4-4"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/><path d="M7 17h.01"/></svg></span><span class="nav-label">Загрузка моделей</span></button>
+        <button class="nav-item settings-nav" data-page="settings" title="Настройки"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m10.3 3.3.4-1.3h2.6l.4 1.3a2 2 0 0 0 2.6 1.2l1.2-.6 1.8 1.8-.6 1.2a2 2 0 0 0 1.2 2.6l1.3.4v2.6l-1.3.4a2 2 0 0 0-1.2 2.6l.6 1.2-1.8 1.8-1.2-.6a2 2 0 0 0-2.6 1.2l-.4 1.3h-2.6l-.4-1.3a2 2 0 0 0-2.6-1.2l-1.2.6-1.8-1.8.6-1.2a2 2 0 0 0-1.2-2.6L3 12.5V9.9l1.3-.4a2 2 0 0 0 1.2-2.6l-.6-1.2 1.8-1.8 1.2.6a2 2 0 0 0 2.6-1.2Z" transform="translate(0 1) scale(.95)"/><circle cx="12" cy="12" r="3"/></svg></span><span class="nav-label">Настройки</span></button>
       </nav>
       <div class="sidebar-bottom"><span class="online-dot"></span><span class="sidebar-bottom-label">Flow готов к работе</span></div>
     </aside>
@@ -31,7 +32,7 @@
     <main class="main">
       <header class="topbar">
         <div class="topbar-brand"><img src="/assets/logo.png" alt="Логотип Flow" /><div><strong>Flow</strong><span>AI Manager</span></div></div>
-        <div class="topbar-actions"><span class="topbar-caption">Ваше пространство для творчества</span><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Переключить тему" aria-pressed="false"><span class="theme-toggle-icon" id="theme-toggle-icon" aria-hidden="true">☀</span><span id="theme-toggle-label">Светлая тема</span></button><span class="avatar">F</span></div>
+        <div class="topbar-actions"><span class="topbar-caption">Ваше пространство для творчества</span><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Выбрать тему оформления" title="Выбрать тему оформления"><span class="theme-toggle-icon" id="theme-toggle-icon" aria-hidden="true">☾</span><span id="theme-toggle-label">Тёмная</span></button><span class="avatar">F</span></div>
       </header>
 
       <div class="content">
@@ -58,7 +59,19 @@
 
         <section class="page" id="page-settings" aria-labelledby="settings-title">
           <div class="page-heading"><div><span class="eyebrow">ПЕРСОНАЛИЗАЦИЯ</span><h1 id="settings-title">Настройки</h1><p>Основные параметры Flow и доступ к каталогу моделей.</p></div><span class="page-symbol">⚙</span></div>
-          <div class="panel settings-panel"><div class="setting-row"><div><h2>Оформление</h2><p>Выбранная цветовая схема интерфейса.</p></div><span class="setting-value" id="theme-state">Тёмная</span></div><div class="setting-row"><div><h2>Язык</h2><p>Язык интерфейса</p></div><span class="setting-value">Русский</span></div><div class="setting-row installation-row"><div><h2>Папка установки Stable Diffusion</h2><p>Flow создаст в выбранной папке каталог sd-webui.</p></div></div><div class="path-control"><input id="install-dir-settings" type="text" readonly aria-label="Папка установки Stable Diffusion" placeholder="Загрузка пути…" /><button id="browse-install-settings" class="secondary-button" type="button">Обзор...</button></div><div class="setting-row token-row"><div><h2>Ключ Civitai API</h2><p>Хранится только на этом устройстве. Нужен для закрытых моделей и загрузок.</p></div><span class="setting-value" id="token-state">Не задан</span></div><form id="token-form" class="token-form"><input type="password" id="token-input" placeholder="Вставьте API-ключ" autocomplete="off" aria-label="Ключ Civitai API" /><button type="submit" class="secondary-button">Сохранить ключ</button></form><div class="setting-row"><div><h2>Папка моделей</h2><p id="models-path">Загрузка…</p></div></div></div>
+          <div class="panel settings-panel">
+            <div class="setting-row"><div><h2>Оформление</h2><p>Выберите палитру Flow. Изменения применяются сразу.</p></div><span class="setting-value" id="theme-state">Тёмная</span></div>
+            <div class="theme-picker" id="theme-picker">
+              <section class="theme-group" aria-labelledby="theme-standard-title"><div class="theme-group-heading"><h3 id="theme-standard-title">Стандартные</h3><p>Привычные режимы на каждый день</p></div><div class="theme-options" id="theme-standard"></div></section>
+              <section class="theme-group" aria-labelledby="theme-extra-title"><div class="theme-group-heading"><h3 id="theme-extra-title">Дополнительные</h3><p>Атмосферные палитры для рабочего пространства</p></div><div class="theme-options" id="theme-extra"></div></section>
+            </div>
+            <div class="setting-row"><div><h2>Язык</h2><p>Язык интерфейса</p></div><span class="setting-value">Русский</span></div>
+            <div class="setting-row installation-row"><div><h2>Папка установки Stable Diffusion</h2><p>Flow создаст в выбранной папке каталог sd-webui.</p></div></div>
+            <div class="path-control"><input id="install-dir-settings" type="text" readonly aria-label="Папка установки Stable Diffusion" placeholder="Загрузка пути…" /><button id="browse-install-settings" class="secondary-button" type="button">Обзор...</button></div>
+            <div class="setting-row token-row"><div><h2>Ключ Civitai API</h2><p>Хранится только на этом устройстве. Нужен для закрытых моделей и загрузок.</p></div><span class="setting-value" id="token-state">Не задан</span></div>
+            <form id="token-form" class="token-form"><input type="password" id="token-input" placeholder="Вставьте API-ключ" autocomplete="off" aria-label="Ключ Civitai API" /><button type="submit" class="secondary-button">Сохранить ключ</button></form>
+            <div class="setting-row"><div><h2>Папка моделей</h2><p id="models-path">Загрузка…</p></div></div>
+          </div>
         </section>
       </div>
       <div class="toast" id="toast" role="status" aria-live="polite"></div>

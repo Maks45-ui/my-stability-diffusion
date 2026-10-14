@@ -15,7 +15,7 @@ Build the Windows installer with `pnpm dist:win`. GitHub Actions also builds an 
 
 ## Settings
 
-- Use the header control to switch between light and dark themes. The preference is saved in `localStorage`.
+- Open theme settings from the header. Choose Light, Dark, System, Заказ, Багровая Луна, or Синелетовые сумерки. The choice is saved in `localStorage`; System follows Windows color scheme changes while Flow is open.
 - In Settings, choose an existing parent folder with **Обзор...**. Flow saves this path locally and installs AUTOMATIC1111 in its `sd-webui` subfolder. The same folder can be selected in the install dialog.
 - A Civitai API key can be saved in Settings if required for restricted models. `CIVITAI_API_KEY` can also be supplied as an environment variable.
 

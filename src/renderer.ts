@@ -1,7 +1,8 @@
 import { flowApi } from "./bridge";
 import { DownloadManager } from "./download-manager";
 import { startSplashScreen } from "./splash";
-import type { AppState, ModelSummary, Page, TaskEvent, Theme, ThemeState } from "./types";
+import { ThemeController } from "./theme";
+import type { AppState, ModelSummary, Page, TaskEvent } from "./types";
 
 window.flow = flowApi;
 
@@ -28,32 +29,19 @@ const downloadManager = new DownloadManager(
   element<HTMLElement>("download-count"),
   notify
 );
+new ThemeController(
+  element<HTMLElement>("theme-standard"),
+  element<HTMLElement>("theme-extra"),
+  element<HTMLElement>("theme-state"),
+  element<HTMLElement>("theme-toggle-label"),
+  element<HTMLElement>("theme-toggle-icon")
+);
 let hasLoadedCatalog = false;
 let searchSequence = 0;
 let debounceTimer: number | undefined;
 let toastTimer: number | undefined;
 let installing = false;
 let installationDir = "";
-
-function savedTheme(): Theme {
-  try { return localStorage.getItem("flow.theme") === "light" ? "light" : "dark"; }
-  catch { return "dark"; }
-}
-
-const theme: ThemeState = { current: savedTheme() };
-
-function applyTheme(next: Theme): void {
-  theme.current = next;
-  document.documentElement.dataset.theme = next;
-  const light = next === "light";
-  const button = element<HTMLButtonElement>("theme-toggle");
-  button.setAttribute("aria-pressed", String(light));
-  button.setAttribute("aria-label", light ? "Включить тёмную тему" : "Включить светлую тему");
-  element<HTMLElement>("theme-toggle-icon").textContent = light ? "☾" : "☀";
-  element<HTMLElement>("theme-toggle-label").textContent = light ? "Тёмная тема" : "Светлая тема";
-  element<HTMLElement>("theme-state").textContent = light ? "Светлая" : "Тёмная";
-  try { localStorage.setItem("flow.theme", next); } catch { /* UI still works if storage is disabled. */ }
-}
 
 function showInstallationDir(path: string): void {
   installationDir = path;
@@ -297,7 +285,10 @@ searchInput.addEventListener("input", () => {
 searchInput.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); void searchModels(); } });
 element<HTMLButtonElement>("browse-install-settings").addEventListener("click", () => void browseInstallationDir());
 element<HTMLButtonElement>("browse-install-dialog").addEventListener("click", () => void browseInstallationDir());
-element<HTMLButtonElement>("theme-toggle").addEventListener("click", () => applyTheme(theme.current === "dark" ? "light" : "dark"));
+element<HTMLButtonElement>("theme-toggle").addEventListener("click", () => {
+  showPage("settings");
+  element<HTMLElement>("theme-picker").scrollIntoView({ behavior: "smooth", block: "start" });
+});
 element<HTMLFormElement>("token-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = element<HTMLInputElement>("token-input");
@@ -306,7 +297,6 @@ element<HTMLFormElement>("token-form").addEventListener("submit", async (event) 
 });
 window.addEventListener("resize", updateIndicator);
 void window.flow.onTask(onTask).catch((error: unknown) => notify(message(error)));
-applyTheme(theme.current);
 startSplashScreen();
 void refreshState();
 void downloadManager.restore().catch((error: unknown) => notify(message(error)));

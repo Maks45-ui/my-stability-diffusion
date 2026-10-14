@@ -69,10 +69,12 @@ export interface FlowAPI {
   onTask(callback: (event: TaskEvent) => void): Promise<() => void>;
 }
 
-export type Theme = "dark" | "light";
+export type Theme = "light" | "dark" | "system" | "zakaz" | "crimson-moon" | "blueviolet-dusk";
+export type ResolvedTheme = Exclude<Theme, "system">;
 
 export interface ThemeState {
-  current: Theme;
+  selected: Theme;
+  resolved: ResolvedTheme;
 }
 
 declare global {
