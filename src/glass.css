@@ -38,6 +38,7 @@
 
 .sidebar.glass-surface {
   flex-shrink: 0;
+  z-index: 2;
   border-radius: 0 28px 28px 0;
   border-left: 0;
   border-top: 0;
@@ -45,7 +46,10 @@
   background: var(--glass-sidebar-bg);
   -webkit-backdrop-filter: blur(30px) saturate(150%);
   backdrop-filter: blur(30px) saturate(150%);
+  transition: width .28s cubic-bezier(.4, 0, .2, 1), background-color .28s ease,
+    border-color .28s ease, box-shadow .28s ease;
 }
+.sidebar.is-animating { will-change: width; }
 .sidebar.glass-surface::before { opacity: .35; }
 .sidebar.glass-surface:hover::before { opacity: .55; }
 

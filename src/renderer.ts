@@ -256,11 +256,42 @@ document.querySelectorAll<HTMLButtonElement>(".nav-item").forEach((button) => {
     if (page === "home" || page === "gallery" || page === "models" || page === "settings") showPage(page);
   });
 });
-element<HTMLButtonElement>("menu-toggle").addEventListener("click", () => {
-  sidebar.classList.toggle("collapsed");
-  const collapsed = sidebar.classList.contains("collapsed");
-  element<HTMLButtonElement>("menu-toggle").setAttribute("aria-label", collapsed ? "Развернуть меню" : "Свернуть меню");
+const menuToggle = element<HTMLButtonElement>("menu-toggle");
+let sidebarAnimating = false;
+let sidebarAnimationTimer: number | undefined;
+
+function finishSidebarAnimation(): void {
+  if (!sidebarAnimating) return;
+  sidebarAnimating = false;
+  window.clearTimeout(sidebarAnimationTimer);
+  sidebar.classList.remove("is-animating");
   window.requestAnimationFrame(updateIndicator);
+}
+
+sidebar.addEventListener("transitionend", (event: TransitionEvent) => {
+  if (event.target === sidebar && event.propertyName === "width") finishSidebarAnimation();
+});
+sidebar.addEventListener("transitioncancel", (event: TransitionEvent) => {
+  if (event.target === sidebar && event.propertyName === "width") finishSidebarAnimation();
+});
+
+menuToggle.addEventListener("click", () => {
+  if (sidebarAnimating) return;
+  sidebarAnimating = true;
+  sidebar.classList.add("is-animating");
+  // Apply hidden labels before changing width so text cannot overlap during motion.
+  void sidebar.offsetWidth;
+  const collapsed = !sidebar.classList.contains("collapsed");
+  sidebar.classList.toggle("collapsed", collapsed);
+  const label = collapsed ? "Развернуть меню" : "Свернуть меню";
+  menuToggle.setAttribute("aria-label", label);
+  menuToggle.setAttribute("title", label);
+  menuToggle.setAttribute("aria-expanded", String(!collapsed));
+  // Covers reduced motion and cases where a width transition is cancelled.
+  sidebarAnimationTimer = window.setTimeout(finishSidebarAnimation, 360);
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || window.matchMedia("(max-width: 760px)").matches) {
+    finishSidebarAnimation();
+  }
 });
 element<HTMLButtonElement>("add-package").addEventListener("click", () => installDialog.showModal());
 element<HTMLButtonElement>("close-install").addEventListener("click", () => installDialog.close());
