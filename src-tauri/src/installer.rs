@@ -151,10 +151,12 @@ fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(
 
 #[tauri::command]
 pub(crate) async fn install_web_ui(app: AppHandle, state: State<'_, Arc<InstallControl>>, installation_dir: String) -> Result<(), String> {
-    let selected = PathBuf::from(installation_dir);
+    let selected = crate::paths::subprocess_path(&PathBuf::from(installation_dir.trim()));
     if !selected.is_absolute() || !selected.is_dir() { return Err("Выберите существующую папку установки.".to_owned()); }
     // Reject stale UI state: the path passed to Rust must be the saved selection.
-    if selected.canonicalize().map_err(|error| error.to_string())? != crate::installation_dir(&app)?.canonicalize().map_err(|error| error.to_string())? {
+    let selected = crate::paths::subprocess_path(&selected.canonicalize().map_err(|error| error.to_string())?);
+    let saved = crate::paths::subprocess_path(&crate::installation_dir(&app)?.canonicalize().map_err(|error| error.to_string())?);
+    if selected != saved {
         return Err("Папка установки изменилась. Повторите выбор.".to_owned());
     }
     if state.running.swap(true, Ordering::SeqCst) { return Err("Установка уже выполняется.".to_owned()); }

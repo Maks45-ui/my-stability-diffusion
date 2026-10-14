@@ -55,7 +55,7 @@ async function browseInstallationDir(): Promise<void> {
     if (selected === null) return;
     // Persist the chosen parent folder before the installer starts.
     await window.flow.saveInstallationDirectory(selected);
-    showInstallationDir(selected);
+    // get_state returns the Windows path without the verbatim namespace prefix.
     await refreshState();
   } catch (error) { notify(message(error)); }
 }

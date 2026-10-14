@@ -1,6 +1,7 @@
 mod civitai;
 mod discord;
 mod installer;
+mod paths;
 
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, sync::Arc};
@@ -83,11 +84,11 @@ fn write_settings(app: &AppHandle, settings: &Settings) -> Result<(), String> {
 
 pub(crate) fn installation_dir(app: &AppHandle) -> Result<PathBuf, String> {
     if let Some(saved) = read_settings(app)?.installation_dir {
-        return Ok(PathBuf::from(saved));
+        return Ok(paths::subprocess_path(&PathBuf::from(saved)));
     }
     let default = data_dir(app)?.join("packages");
     fs::create_dir_all(&default).map_err(|error| error.to_string())?;
-    Ok(default)
+    Ok(paths::subprocess_path(&default))
 }
 
 pub(crate) fn civitai_token(app: &AppHandle) -> Result<String, String> {
@@ -129,12 +130,12 @@ fn get_state(app: AppHandle, webui: State<'_, installer::WebuiControl>) -> Resul
 
 #[tauri::command]
 fn set_installation_dir(app: AppHandle, directory: String) -> Result<(), String> {
-    let path = PathBuf::from(directory.trim());
+    let path = paths::subprocess_path(&PathBuf::from(directory.trim()));
     // The dialog returns an existing directory. Recheck in Rust before persisting it.
     if !path.is_absolute() || !path.is_dir() {
         return Err("Выберите существующую абсолютную папку установки.".to_owned());
     }
-    let normalized = path.canonicalize().map_err(|error| error.to_string())?;
+    let normalized = paths::subprocess_path(&path.canonicalize().map_err(|error| error.to_string())?);
     let mut settings = read_settings(&app)?;
     settings.installation_dir = Some(normalized.to_string_lossy().into_owned());
     write_settings(&app, &settings)
