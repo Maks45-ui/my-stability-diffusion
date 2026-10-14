@@ -13,6 +13,10 @@ use tauri::{AppHandle, State};
 
 const WEBUI_REPO: &str = "https://github.com/AUTOMATIC1111/stable-diffusion-webui.git";
 const SD_REPO: &str = "https://github.com/w-e-w/stablediffusion.git";
+const CLIP_REPO: &str = "https://github.com/openai/CLIP.git";
+const CLIP_REVISION: &str = "d50d76daa670286dd6cacf3bcd80b5e4823fc8e1";
+const OPENCLIP_REPO: &str = "https://github.com/mlfoundations/open_clip.git";
+const OPENCLIP_REVISION: &str = "bb6e834e9c70d9c27d0dc3ecedeebeaeb1ffad6b";
 
 #[derive(Default)]
 pub(crate) struct InstallControl {
@@ -50,6 +54,16 @@ fn hide_console(command: &mut Command) {
         command.creation_flags(CREATE_NO_WINDOW);
     }
     #[cfg(not(windows))] let _ = command;
+}
+
+fn use_local_clip_sources(command: &mut Command, directory: &Path) {
+    for (variable, folder) in [("CLIP_PACKAGE", "clip"), ("OPENCLIP_PACKAGE", "open_clip")] {
+        let source = directory.join("repositories").join(folder);
+        if source.join(".git").is_dir() {
+            // launch_utils builds a shell command, so the path must stay quoted.
+            command.env(variable, format!("\"{}\"", source.display()));
+        }
+    }
 }
 
 fn emit_output(app: &AppHandle, output: &[u8]) {
@@ -94,6 +108,18 @@ fn python_310(app: &AppHandle) -> Result<(String, Vec<String>), String> {
         }
     }
     Err("Не найден Python 3.10. Установите его и перезапустите Flow.".to_owned())
+}
+
+fn python_module_installed(python: &Path, module: &str) -> Result<bool, String> {
+    let mut command = Command::new(python);
+    command.args(["-c", "import importlib.util, sys; print(int(importlib.util.find_spec(sys.argv[1]) is not None))", module])
+        .stdin(Stdio::null());
+    hide_console(&mut command);
+    let output = command.output().map_err(|error| format!("Не удалось проверить модуль {module}: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("Не удалось проверить модуль {module}: {}", String::from_utf8_lossy(&output.stderr).trim()));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim() == "1")
 }
 
 fn emit_pipe_line(app: &AppHandle, kind: &'static str, phase: &'static str, line: &[u8], locked_file: Option<&AtomicBool>) {
@@ -141,6 +167,7 @@ fn run_logged(app: &AppHandle, control: &InstallControl, program: &str, args: &[
         .env("WEBUI_LAUNCH_LIVE_OUTPUT", "1")
         .env("STABLE_DIFFUSION_REPO", SD_REPO)
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    use_local_clip_sources(&mut command, cwd);
     hide_console(&mut command);
     let mut child = command.spawn().map_err(|error| format!("Не удалось запустить {program}: {error}"))?;
     if let Ok(mut pid) = control.pid.lock() { *pid = Some(child.id()); }
@@ -181,6 +208,53 @@ fn run_logged_retry_locked(app: &AppHandle, control: &InstallControl, program: &
     unreachable!("цикл всегда возвращает результат последней попытки")
 }
 
+fn ensure_local_clip_source(app: &AppHandle, control: &InstallControl, directory: &Path, folder: &str, url: &str, revision: &str) -> Result<PathBuf, String> {
+    let repositories = directory.join("repositories");
+    fs::create_dir_all(&repositories).map_err(|error| error.to_string())?;
+    let source = repositories.join(folder);
+    let source_arg = source.to_string_lossy().into_owned();
+    if !source.exists() {
+        notify(app, "dependencies", format!("Загрузка исходников {folder}…"));
+        run_logged(app, control, "git", &["clone".to_owned(), "--progress".to_owned(), url.to_owned(), source_arg.clone()], directory, None)?;
+    }
+    if !source.join(".git").is_dir() {
+        return Err(format!("Папка {} занята другим содержимым.", source.display()));
+    }
+    let origin = command_output(app, "git", &["-C".to_owned(), source_arg.clone(), "remote".to_owned(), "get-url".to_owned(), "origin".to_owned()])?;
+    if origin.trim_end_matches('/').trim_end_matches(".git").to_lowercase() != url.trim_end_matches(".git").to_lowercase() {
+        return Err(format!("В папке {} находится другой Git-репозиторий.", source.display()));
+    }
+    let current = command_output(app, "git", &["-C".to_owned(), source_arg.clone(), "rev-parse".to_owned(), "HEAD".to_owned()])?;
+    if current != revision {
+        let changes = command_output(app, "git", &["-C".to_owned(), source_arg.clone(), "status".to_owned(), "--porcelain".to_owned()])?;
+        if !changes.is_empty() { return Err(format!("В папке {} есть несохранённые изменения; обновление остановлено.", source.display())); }
+        let revision_exists = command_output(app, "git", &["-C".to_owned(), source_arg.clone(), "cat-file".to_owned(), "-e".to_owned(), format!("{revision}^{{commit}}")]).is_ok();
+        if !revision_exists {
+            run_logged(app, control, "git", &["-C".to_owned(), source_arg.clone(), "fetch".to_owned(), "--no-tags".to_owned(), "origin".to_owned(), revision.to_owned()], directory, None)?;
+        }
+        run_logged(app, control, "git", &["-C".to_owned(), source_arg, "checkout".to_owned(), "--detach".to_owned(), revision.to_owned()], directory, None)?;
+    }
+    Ok(source)
+}
+
+fn install_local_clip(app: &AppHandle, control: &InstallControl, python: &Path, directory: &Path, module: &str, folder: &str, url: &str, revision: &str) -> Result<(), String> {
+    if python_module_installed(python, module)? {
+        notify(app, "dependencies", format!("{module} уже установлен; пропускаю."));
+        return Ok(());
+    }
+    let source = ensure_local_clip_source(app, control, directory, folder, url, revision)?;
+    notify(app, "dependencies", format!("Установка {module} из локального репозитория…"));
+    run_logged_retry_locked(app, control, &python.to_string_lossy(), &[
+        "-m".to_owned(), "pip".to_owned(), "install".to_owned(),
+        "--no-build-isolation".to_owned(), "--no-deps".to_owned(),
+        "-e".to_owned(), source.to_string_lossy().into_owned(),
+    ], directory)?;
+    if !python_module_installed(python, module)? {
+        return Err(format!("Модуль {module} не появился в виртуальном окружении после установки."));
+    }
+    Ok(())
+}
+
 fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(), String> {
     notify(app, "checking", "Проверка Git и Python 3.10…");
     command_output(app, "git", &["--version".to_owned()]).map_err(|_| "Git не найден. Установите Git и перезапустите Flow.".to_owned())?;
@@ -208,10 +282,21 @@ fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(
     if !directory.join("launch.py").is_file() { return Err("Файл launch.py не найден.".to_owned()); }
     notify(app, "dependencies", "Обновление pip в виртуальном окружении…");
     run_logged_retry_locked(app, control, &venv_python.to_string_lossy(), &["-m".to_owned(), "pip".to_owned(), "install".to_owned(), "--upgrade".to_owned(), "pip".to_owned()], &directory)?;
+    let clip_missing = !python_module_installed(&venv_python, "clip")?;
+    let openclip_missing = !python_module_installed(&venv_python, "open_clip")?;
+    if clip_missing || openclip_missing {
+        notify(app, "dependencies", "Подготовка сборщика Python для CLIP…");
+        run_logged_retry_locked(app, control, &venv_python.to_string_lossy(), &["-m".to_owned(), "pip".to_owned(), "install".to_owned(), "wheel".to_owned(), "setuptools==69.5.1".to_owned()], &directory)?;
+    }
+    if clip_missing { install_local_clip(app, control, &venv_python, &directory, "clip", "clip", CLIP_REPO, CLIP_REVISION)?; }
+    if openclip_missing { install_local_clip(app, control, &venv_python, &directory, "open_clip", "open_clip", OPENCLIP_REPO, OPENCLIP_REVISION)?; }
     notify(app, "dependencies", "Установка зависимостей WebUI…");
     // launch.py installs requirements_versions.txt with WebUI's own torch configuration.
     run_logged_retry_locked(app, control, &venv_python.to_string_lossy(), &["-u".to_owned(), "launch.py".to_owned(), "--exit".to_owned(), "--skip-torch-cuda-test".to_owned()], &directory)?;
     if control.cancelled.load(Ordering::SeqCst) { return Err("Установка отменена.".to_owned()); }
+    if !python_module_installed(&venv_python, "clip")? || !python_module_installed(&venv_python, "open_clip")? {
+        return Err("После установки WebUI модули CLIP или open_clip недоступны в виртуальном окружении.".to_owned());
+    }
     let version = command_output(app, "git", &["-C".to_owned(), directory.to_string_lossy().into_owned(), "describe".to_owned(), "--tags".to_owned(), "--always".to_owned()]).unwrap_or_else(|_| "Установлен".to_owned());
     #[cfg(windows)] {
         let settings = directory.join("webui.settings.bat");
@@ -284,6 +369,7 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) -> R
         command.arg(script);
         command
     };
+    use_local_clip_sources(&mut command, &directory);
     command.current_dir(&directory)
         .env("PYTHONUNBUFFERED", "1")
         .env("WEBUI_LAUNCH_LIVE_OUTPUT", "1")
