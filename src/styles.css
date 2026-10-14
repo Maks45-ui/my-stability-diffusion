@@ -136,8 +136,13 @@ h1, h2, h3, p { margin: 0; }
 .package-details p, .package-details small { color: var(--muted); font-size: 11px; }
 .package-details small { display: block; overflow-wrap: anywhere; margin-top: 11px; }
 .package-state { color: var(--positive); background: color-mix(in srgb, var(--positive) 14%, transparent); padding: 6px 8px; border-radius: 8px; font-size: 10px; white-space: nowrap; }
-.package-actions { grid-column: 1 / -1; display: flex; gap: 9px; margin-top: 8px; }
-.package-actions button { flex: 1; min-height: 37px; }
+.package-state[data-state="stopped"] { color: var(--muted); background: var(--surface); }
+.package-state[data-state="stopping"] { color: var(--accent); background: var(--accent-soft); }
+.package-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 9px; margin-top: 8px; }
+.package-actions button { flex: 1 1 105px; min-height: 37px; }
+.package-stop { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
+.package-stop:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 13%, var(--surface)); }
+.package-stop:disabled { opacity: .48; cursor: default; }
 .package-settings-icon { font-size: 16px; line-height: 1; color: var(--accent); }
 .add-panel { padding: 25px; display: flex; flex-direction: column; background: var(--add-bg); }
 .add-art { width: 54px; height: 54px; display: grid; place-items: center; border-radius: 14px; color: var(--on-accent); font-size: 33px; background: linear-gradient(135deg, var(--accent), var(--nav-end)); box-shadow: 0 10px 24px var(--accent-glow); margin-bottom: 25px; }

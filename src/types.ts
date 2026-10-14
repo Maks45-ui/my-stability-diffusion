@@ -1,11 +1,13 @@
 export type Page = "home" | "gallery" | "models" | "settings";
-export type TaskPhase = "idle" | "checking" | "cloning" | "venv" | "dependencies" | "running" | "log" | "paused" | "done" | "error" | "cancelled";
+export type TaskPhase = "idle" | "checking" | "cloning" | "venv" | "dependencies" | "running" | "stopping" | "log" | "paused" | "done" | "error" | "cancelled";
 
 export interface PackageInfo {
   name: string;
   version: string;
   path: string;
   running: boolean;
+  stopping: boolean;
+  stopped: boolean;
 }
 
 export interface AppState {
@@ -63,6 +65,7 @@ export interface FlowAPI {
   saveInstallationDirectory(directory: string): Promise<void>;
   cancelInstall(): Promise<void>;
   launchWebUI(): Promise<void>;
+  stopWebUI(): Promise<void>;
   getWebUIArguments(): Promise<string[]>;
   saveWebUIArguments(argumentsList: string[]): Promise<string[]>;
   listGalleryImages(): Promise<GalleryImage[]>;

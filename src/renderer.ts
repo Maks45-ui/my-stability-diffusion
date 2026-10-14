@@ -54,9 +54,11 @@ new ThemeController(
 let hasLoadedCatalog = false;
 let searchSequence = 0;
 let gallerySequence = 0;
+let stateSequence = 0;
 let debounceTimer: number | undefined;
 let toastTimer: number | undefined;
 let installing = false;
+let stoppingWebui = false;
 let installationDir = "";
 let logFrame: number | undefined;
 let terminalHasOutput = false;
@@ -116,6 +118,7 @@ async function browseInstallationDir(): Promise<void> {
     await window.flow.saveInstallationDirectory(selected);
     // get_state returns the Windows path without the verbatim namespace prefix.
     await refreshState();
+    await downloadManager.restore();
   } catch (error) { notify(message(error)); }
 }
 
@@ -252,13 +255,15 @@ function renderPackages(state: AppState): void {
     const icon = make("div", "package-icon", "A");
     const details = make("div", "package-details");
     details.append(make("h3", "", item.name), make("p", "", `${item.version} · Stable Diffusion`), make("small", "", item.path));
-    const badge = make("span", "package-state", item.running ? "● Запущен" : "● Готов");
+    const badge = make("span", "package-state", item.stopping ? "● Останавливается" : item.running ? "● Запущен" : item.stopped ? "● Остановлен" : "● Готов");
+    badge.dataset.state = item.stopping ? "stopping" : item.running ? "running" : item.stopped ? "stopped" : "ready";
     card.append(icon, details, badge);
     const actions = make("div", "package-actions");
     const launch = make("button", "primary-button", "Запустить");
     launch.type = "button";
-    launch.disabled = item.running;
+    launch.disabled = item.running || stoppingWebui;
     launch.addEventListener("click", async () => {
+      launch.disabled = true;
       setConsoleVisible(true);
       setConsoleStatus("Запуск WebUI", "running");
       queueLog(terminal, "[WebUI] Запуск...");
@@ -270,21 +275,47 @@ function renderPackages(state: AppState): void {
         setConsoleStatus("Ошибка WebUI", "error");
         queueLog(terminal, `[WebUI] ${message(error)}`);
         notify(message(error));
+        await refreshState();
+      }
+    });
+    const stop = make("button", "secondary-button package-stop", "Остановить");
+    stop.type = "button";
+    stop.disabled = !item.running || item.stopping || stoppingWebui;
+    stop.addEventListener("click", async () => {
+      if (stoppingWebui) return;
+      stoppingWebui = true;
+      stop.disabled = true;
+      launch.disabled = true;
+      setConsoleVisible(true);
+      setConsoleStatus("Остановка WebUI", "running");
+      try {
+        await window.flow.stopWebUI();
+        await refreshState();
+      } catch (error) {
+        stoppingWebui = false;
+        queueLog(terminal, `[WebUI] ${message(error)}`);
+        notify(message(error));
+        await refreshState();
       }
     });
     const settings = make("button", "secondary-button", "Настройки");
     settings.type = "button";
     settings.prepend(make("span", "package-settings-icon", "⚙"));
     settings.addEventListener("click", () => void openWebuiSettings());
-    actions.append(launch, settings);
+    actions.append(launch, stop, settings);
     card.append(actions);
     packageList.append(card);
   }
 }
 
 async function refreshState(): Promise<void> {
-  try { renderPackages(await window.flow.getState()); }
-  catch (error) { notify(message(error)); }
+  const sequence = ++stateSequence;
+  try {
+    const state = await window.flow.getState();
+    if (sequence === stateSequence) renderPackages(state);
+  } catch (error) {
+    if (sequence === stateSequence) notify(message(error));
+  }
 }
 
 const imageObserver = new IntersectionObserver((entries, observer) => {
@@ -450,7 +481,9 @@ function onTask(event: TaskEvent): void {
   }
   if (event.kind === "launch") {
     if (event.phase === "running") setConsoleStatus("WebUI работает", "running");
+    if (event.phase === "stopping") setConsoleStatus("Остановка WebUI", "running");
     if (event.phase === "done" || event.phase === "error") {
+      stoppingWebui = false;
       setConsoleStatus(event.phase === "done" ? "WebUI остановлен" : "Ошибка WebUI", event.phase === "done" ? "done" : "error");
       if (event.phase === "error") notify(event.message);
       void refreshState();

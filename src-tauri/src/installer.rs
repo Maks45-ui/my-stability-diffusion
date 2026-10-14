@@ -26,14 +26,31 @@ pub(crate) struct InstallControl {
     pid: Mutex<Option<u32>>,
 }
 
-#[derive(Default)]
+impl InstallControl {
+    pub(crate) fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+}
+
+#[derive(Default, Clone)]
 pub(crate) struct WebuiControl {
     running: Arc<AtomicBool>,
+    stopping: Arc<AtomicBool>,
+    stopped: Arc<AtomicBool>,
+    pid: Arc<Mutex<Option<u32>>>,
 }
 
 impl WebuiControl {
     pub(crate) fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn is_stopping(&self) -> bool {
+        self.stopping.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn was_stopped(&self) -> bool {
+        self.stopped.load(Ordering::SeqCst)
     }
 }
 
@@ -404,6 +421,8 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) -> R
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     hide_console(&mut command);
     if webui.running.swap(true, Ordering::SeqCst) { return Ok(()); }
+    webui.stopping.store(false, Ordering::SeqCst);
+    webui.stopped.store(false, Ordering::SeqCst);
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
@@ -411,20 +430,60 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) -> R
             return Err(format!("Не удалось запустить WebUI: {error}"));
         }
     };
+    *webui.pid.lock().unwrap_or_else(|poison| poison.into_inner()) = Some(child.id());
     notify_kind(&app, "launch", "running", "WebUI запускается…");
     let running = Arc::clone(&webui.running);
+    let stopping = Arc::clone(&webui.stopping);
+    let stopped = Arc::clone(&webui.stopped);
+    let pid = Arc::clone(&webui.pid);
     thread::spawn(move || {
         let stdout = child.stdout.take().map(|pipe| pipe_logs(app.clone(), "launch", "log", pipe, None));
         let stderr = child.stderr.take().map(|pipe| pipe_logs(app.clone(), "launch", "log", pipe, None));
         let result = child.wait();
         if let Some(handle) = stdout { let _ = handle.join(); }
         if let Some(handle) = stderr { let _ = handle.join(); }
+        let was_stopping = stopping.swap(false, Ordering::SeqCst);
+        *pid.lock().unwrap_or_else(|poison| poison.into_inner()) = None;
+        stopped.store(true, Ordering::SeqCst);
         running.store(false, Ordering::SeqCst);
         match result {
+            Ok(_) if was_stopping => notify_kind(&app, "launch", "done", "WebUI остановлен пользователем."),
             Ok(status) if status.success() => notify_kind(&app, "launch", "done", "WebUI остановлен."),
             Ok(status) => notify_kind(&app, "launch", "error", format!("WebUI завершился с кодом {:?}.", status.code())),
             Err(error) => notify_kind(&app, "launch", "error", format!("Ошибка процесса WebUI: {error}")),
         }
     });
     Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn stop_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) -> Result<(), String> {
+    if !webui.is_running() { return Err("WebUI уже остановлен.".to_owned()); }
+    let pid = (*webui.pid.lock().unwrap_or_else(|poison| poison.into_inner()))
+        .ok_or("Процесс WebUI ещё запускается. Повторите остановку через секунду.")?;
+    if webui.stopping.swap(true, Ordering::SeqCst) { return Ok(()); }
+    notify_kind(&app, "launch", "stopping", "Остановка WebUI…");
+    let control = (*webui).clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = Command::new("taskkill");
+            command.args(["/PID", &pid.to_string(), "/T", "/F"]);
+            hide_console(&mut command);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = {
+            let mut command = Command::new("kill");
+            command.args(["-TERM", &pid.to_string()]);
+            command
+        };
+        let result = command.output().map_err(|error| format!("Не удалось остановить WebUI: {error}"))
+            .and_then(|output| {
+                if output.status.success() || !control.is_running() { Ok(()) }
+                else { Err(format!("Не удалось остановить WebUI: {}", String::from_utf8_lossy(&output.stderr).trim())) }
+            });
+        if result.is_err() { control.stopping.store(false, Ordering::SeqCst); }
+        result
+    }).await.map_err(|error| error.to_string())?
 }

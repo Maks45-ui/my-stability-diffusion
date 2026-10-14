@@ -1,4 +1,4 @@
-use crate::{civitai_token, data_dir, emit_task, TaskEvent};
+use crate::{civitai_token, emit_task, installation_dir, TaskEvent};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -13,6 +13,12 @@ pub(crate) struct DownloadControl {
     running: AtomicBool,
     cancelled: AtomicBool,
     paused: AtomicBool,
+}
+
+impl DownloadControl {
+    pub(crate) fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
 }
 
 #[derive(Serialize)]
@@ -98,8 +104,10 @@ pub(crate) async fn search_models(app: AppHandle, query: String) -> Result<Vec<M
                             item.get("name").and_then(Value::as_str),
                             item.get("downloadUrl").and_then(Value::as_str),
                         ) {
+                            let name = safe_name(name);
+                            if name.is_empty() { continue; }
                             files.push(ModelFile {
-                                name: name.to_owned(), download_url: download_url.to_owned(),
+                                name, download_url: download_url.to_owned(),
                                 size_kb: item.get("sizeKB").and_then(Value::as_f64).unwrap_or(0.0),
                             });
                         }
@@ -138,11 +146,14 @@ fn safe_name(value: &str) -> String {
     value.chars().filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ')).take(150).collect::<String>().trim_matches(|c| c == '.' || c == ' ').to_owned()
 }
 
-fn paths(app: &AppHandle, file_name: &str, model_type: &str) -> Result<(PathBuf, PathBuf, PathBuf), String> {
+pub(crate) fn models_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(installation_dir(app)?.join("sd-webui").join("models").join("Stable-diffusion"))
+}
+
+fn paths(app: &AppHandle, file_name: &str) -> Result<(PathBuf, PathBuf, PathBuf), String> {
     let name = safe_name(file_name);
-    let kind = safe_name(model_type);
-    if name.is_empty() || kind.is_empty() { return Err("Некорректное имя файла или тип модели.".to_owned()); }
-    let target = data_dir(app)?.join("models").join(kind).join(&name);
+    if name.is_empty() || name != file_name { return Err("Некорректное имя файла модели.".to_owned()); }
+    let target = models_directory(app)?.join(&name);
     let temp = target.with_file_name(format!("{name}.flow-part"));
     let meta = target.with_file_name(format!("{name}.flow-meta.json"));
     Ok((target, temp, meta))
@@ -161,7 +172,10 @@ fn download(app: &AppHandle, control: &DownloadControl, file: ModelFile, model_t
     let mut url = allowed_url(&file.download_url)?;
     if !url.path().starts_with("/api/download/models/") { return Err("Недопустимая ссылка скачивания.".to_owned()); }
     url.set_host(Some("civitai.red")).map_err(|_| "Недопустимый адрес скачивания.".to_owned())?;
-    let (target, temp, meta) = paths(app, &file.name, &model_type)?;
+    if !installation_dir(app)?.join("sd-webui").join(".flow-installed.json").is_file() {
+        return Err("Сначала установите пакет WebUI, чтобы загружать модели в его папку.".to_owned());
+    }
+    let (target, temp, meta) = paths(app, &file.name)?;
     if let Some(folder) = target.parent() { fs::create_dir_all(folder).map_err(|error| error.to_string())?; }
     if target.exists() { return Err("Файл уже загружен.".to_owned()); }
     if !resume && temp.exists() { return Err("Найдена незавершённая загрузка. Удалите её перед повтором.".to_owned()); }
@@ -268,54 +282,49 @@ pub(crate) fn cancel_download(state: State<'_, Arc<DownloadControl>>) {
 
 #[tauri::command]
 pub(crate) fn list_downloads(app: AppHandle) -> Result<Vec<DownloadedFile>, String> {
-    let root = data_dir(&app)?.join("models");
+    let root = models_directory(&app)?;
     if !root.exists() { return Ok(Vec::new()); }
     let mut result = Vec::new();
-    for folder in fs::read_dir(root).map_err(|error| error.to_string())? {
-        let folder = folder.map_err(|error| error.to_string())?;
-        if !folder.file_type().map_err(|error| error.to_string())?.is_dir() { continue; }
-        let model_type = folder.file_name().to_string_lossy().into_owned();
-        for entry in fs::read_dir(folder.path()).map_err(|error| error.to_string())? {
-            let entry = entry.map_err(|error| error.to_string())?;
-            if !entry.file_type().map_err(|error| error.to_string())?.is_file() { continue; }
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if let Some(base_name) = name.strip_suffix(".flow-meta.json") {
-                let saved: PartialMetadata = match serde_json::from_slice(&fs::read(entry.path()).map_err(|error| error.to_string())?) {
-                    Ok(saved) => saved,
-                    Err(_) => continue,
-                };
-                if saved.file.name != base_name || saved.model_type != model_type { continue; }
-                let (target, temp, _) = paths(&app, base_name, &model_type)?;
-                if target.exists() { continue; }
-                let downloaded_bytes = fs::metadata(temp).map(|metadata| metadata.len()).unwrap_or(0);
-                let size_bytes = if saved.file.size_kb.is_finite() && saved.file.size_kb > 0.0 {
-                    (saved.file.size_kb * 1024.0) as u64
-                } else { 0 };
-                result.push(DownloadedFile {
-                    name: base_name.to_owned(), model_type: model_type.clone(), size_bytes,
-                    downloaded_bytes, status: "paused", download_url: Some(saved.file.download_url),
-                });
-                continue;
-            }
-            if name.ends_with(".flow-part") { continue; }
-            let size_bytes = entry.metadata().map_err(|error| error.to_string())?.len();
+    for entry in fs::read_dir(root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry.file_type().map_err(|error| error.to_string())?.is_file() { continue; }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if let Some(base_name) = name.strip_suffix(".flow-meta.json") {
+            let saved: PartialMetadata = match serde_json::from_slice(&fs::read(entry.path()).map_err(|error| error.to_string())?) {
+                Ok(saved) => saved,
+                Err(_) => continue,
+            };
+            if saved.file.name != base_name || safe_name(base_name) != base_name { continue; }
+            let (target, temp, _) = paths(&app, base_name)?;
+            if target.exists() { continue; }
+            let downloaded_bytes = fs::metadata(temp).map(|metadata| metadata.len()).unwrap_or(0);
+            let size_bytes = if saved.file.size_kb.is_finite() && saved.file.size_kb > 0.0 {
+                (saved.file.size_kb * 1024.0) as u64
+            } else { 0 };
             result.push(DownloadedFile {
-                name, model_type: model_type.clone(), size_bytes, downloaded_bytes: size_bytes,
-                status: "completed", download_url: None,
+                name: base_name.to_owned(), model_type: saved.model_type, size_bytes,
+                downloaded_bytes, status: "paused", download_url: Some(saved.file.download_url),
             });
+            continue;
         }
+        if name.ends_with(".flow-part") || safe_name(&name) != name { continue; }
+        let size_bytes = entry.metadata().map_err(|error| error.to_string())?.len();
+        result.push(DownloadedFile {
+            name, model_type: "Stable-diffusion".to_owned(), size_bytes, downloaded_bytes: size_bytes,
+            status: "completed", download_url: None,
+        });
     }
     result.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(result)
 }
 
 #[tauri::command]
-pub(crate) fn delete_download(app: AppHandle, model_type: String, file_name: String) -> Result<(), String> {
-    if safe_name(&model_type) != model_type || safe_name(&file_name) != file_name {
-        return Err("Некорректное имя файла или тип модели.".to_owned());
+pub(crate) fn delete_download(app: AppHandle, _model_type: String, file_name: String) -> Result<(), String> {
+    if safe_name(&file_name) != file_name {
+        return Err("Некорректное имя файла модели.".to_owned());
     }
-    let (target, temp, meta) = paths(&app, &file_name, &model_type)?;
-    // Both paths are constructed below Flow's model directory from validated names.
+    let (target, temp, meta) = paths(&app, &file_name)?;
+    // These paths are constructed below the installed package's model directory.
     if target.is_file() { fs::remove_file(target).map_err(|error| error.to_string())?; }
     if temp.is_file() { fs::remove_file(temp).map_err(|error| error.to_string())?; }
     if meta.is_file() { fs::remove_file(meta).map_err(|error| error.to_string())?; }

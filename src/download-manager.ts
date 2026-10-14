@@ -22,7 +22,7 @@ const STATUS_TEXT: Record<DownloadStatus, string> = {
   pausing: "Приостанавливается",
   paused: "Пауза",
   cancelling: "Отменяется",
-  completed: "Готово к установке",
+  completed: "В папке WebUI",
   error: "Ошибка"
 };
 
@@ -68,11 +68,17 @@ export class DownloadManager {
 
   async restore(): Promise<void> {
     const files = await this.api.listDownloads();
+    this.items.clear();
+    this.cards.clear();
+    this.activeId = null;
+    this.list.replaceChildren();
     for (const file of files) this.addCompleted(file);
+    this.renderEmpty();
+    this.updateCount();
   }
 
   enqueue(file: ModelFile, modelType: string, modelName: string): void {
-    const duplicate = [...this.items.values()].some((item) => item.modelType === modelType && item.file.name === file.name);
+    const duplicate = [...this.items.values()].some((item) => item.file.name === file.name);
     if (duplicate) { this.notify("Этот файл уже находится в списке загрузок."); return; }
     const item: DownloadItem = {
       id: crypto.randomUUID(), modelName, modelType, file, status: "queued",
@@ -117,7 +123,7 @@ export class DownloadManager {
   }
 
   private addCompleted(file: DownloadedFile): void {
-    const duplicate = [...this.items.values()].some((item) => item.modelType === file.modelType && item.file.name === file.name);
+    const duplicate = [...this.items.values()].some((item) => item.file.name === file.name);
     if (duplicate) return;
     const paused = file.status === "paused";
     this.add({

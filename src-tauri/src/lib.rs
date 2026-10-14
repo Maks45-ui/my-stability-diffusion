@@ -35,6 +35,8 @@ struct PackageInfo {
     version: String,
     path: String,
     running: bool,
+    stopping: bool,
+    stopped: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -122,6 +124,8 @@ fn get_state(app: AppHandle, webui: State<'_, installer::WebuiControl>) -> Resul
             version,
             path: package.to_string_lossy().into_owned(),
             running: webui.is_running(),
+            stopping: webui.is_stopping(),
+            stopped: webui.was_stopped(),
         }]
     } else {
         Vec::new()
@@ -130,13 +134,22 @@ fn get_state(app: AppHandle, webui: State<'_, installer::WebuiControl>) -> Resul
     Ok(AppState {
         packages,
         has_civitai_token: !token.is_empty(),
-        models_path: data_dir(&app)?.join("models").to_string_lossy().into_owned(),
+        models_path: civitai::models_directory(&app)?.to_string_lossy().into_owned(),
         installation_dir: parent.to_string_lossy().into_owned(),
     })
 }
 
 #[tauri::command]
-fn set_installation_dir(app: AppHandle, directory: String) -> Result<(), String> {
+fn set_installation_dir(
+    app: AppHandle,
+    directory: String,
+    installs: State<'_, Arc<installer::InstallControl>>,
+    webui: State<'_, installer::WebuiControl>,
+    downloads: State<'_, Arc<civitai::DownloadControl>>,
+) -> Result<(), String> {
+    if installs.is_running() || webui.is_running() || downloads.is_running() {
+        return Err("Дождитесь завершения установки, работы WebUI или загрузки модели перед сменой папки.".to_owned());
+    }
     let path = paths::subprocess_path(&PathBuf::from(directory.trim()));
     // The dialog returns an existing directory. Recheck in Rust before persisting it.
     if !path.is_absolute() || !path.is_dir() {
@@ -196,6 +209,7 @@ pub fn run() {
             installer::install_web_ui,
             installer::cancel_install,
             installer::launch_web_ui,
+            installer::stop_web_ui,
             civitai::search_models,
             civitai::download_model,
             civitai::pause_download,
