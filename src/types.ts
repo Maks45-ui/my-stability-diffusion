@@ -1,5 +1,5 @@
 export type Page = "home" | "gallery" | "models" | "settings";
-export type TaskPhase = "idle" | "checking" | "cloning" | "venv" | "dependencies" | "paused" | "done" | "error" | "cancelled";
+export type TaskPhase = "idle" | "checking" | "cloning" | "venv" | "dependencies" | "running" | "log" | "paused" | "done" | "error" | "cancelled";
 
 export interface PackageInfo {
   name: string;
@@ -39,7 +39,7 @@ export interface ModelSummary {
 }
 
 export interface TaskEvent {
-  kind: "install" | "download";
+  kind: "install" | "launch" | "download";
   phase: TaskPhase;
   message: string;
   percent?: number;

@@ -44,6 +44,11 @@
             <section class="panel glass-surface library-panel"><div class="panel-heading"><div><span class="eyebrow">ВАША БИБЛИОТЕКА</span><h2>Установленные пакеты</h2></div><span class="badge" id="package-badge">0 пакетов</span></div><div id="package-list" class="package-list"></div></section>
             <section class="panel glass-surface add-panel"><div class="add-art"><span>＋</span></div><div class="add-copy"><span class="eyebrow">НОВЫЕ ВОЗМОЖНОСТИ</span><h2>Новый пакет</h2><p>Установите AUTOMATIC1111 WebUI в отдельное окружение. Flow покажет каждый шаг установки.</p></div><button class="primary-button" id="add-package">Добавить пакет <span>→</span></button></section>
           </div>
+          <section class="panel glass-surface console-panel" id="console-panel" aria-labelledby="console-title">
+            <div class="console-heading"><div><span class="eyebrow">ПРОЦЕССЫ FLOW</span><h2 id="console-title">Консоль установки и запуска</h2></div><div class="console-actions"><span class="console-status" id="console-status" data-state="idle">Ожидание</span><button class="secondary-button console-clear" id="clear-terminal" type="button">Очистить</button></div></div>
+            <pre class="log-output console-output" id="terminal-log" role="log" aria-live="polite">Логи установки и запуска WebUI появятся здесь.
+</pre>
+          </section>
         </section>
 
         <section class="page" id="page-gallery" aria-labelledby="gallery-title">

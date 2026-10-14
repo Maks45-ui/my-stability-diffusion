@@ -19,6 +19,8 @@ const toast = element<HTMLElement>("toast");
 const installDialog = element<HTMLDialogElement>("install-dialog");
 const imageDialog = element<HTMLDialogElement>("image-dialog");
 const log = element<HTMLElement>("install-log");
+const terminal = element<HTMLElement>("terminal-log");
+const consoleStatus = element<HTMLElement>("console-status");
 const packageList = element<HTMLElement>("package-list");
 const modelGrid = element<HTMLElement>("model-grid");
 const catalogStatus = element<HTMLElement>("catalog-status");
@@ -42,6 +44,29 @@ let debounceTimer: number | undefined;
 let toastTimer: number | undefined;
 let installing = false;
 let installationDir = "";
+let logFrame: number | undefined;
+let terminalHasOutput = false;
+const pendingLogs = new Map<HTMLElement, string>();
+
+function queueLog(target: HTMLElement, message: string): void {
+  const line = message.replace(/\r/g, "").trimEnd();
+  if (!line) return;
+  pendingLogs.set(target, ((pendingLogs.get(target) ?? "") + line + "\n").slice(-100_000));
+  if (logFrame === undefined) logFrame = window.requestAnimationFrame(() => {
+    logFrame = undefined;
+    for (const [output, pending] of pendingLogs) {
+      if (output === terminal && !terminalHasOutput) { terminal.textContent = ""; terminalHasOutput = true; }
+      output.textContent = ((output.textContent ?? "") + pending).slice(-100_000);
+      output.scrollTop = output.scrollHeight;
+    }
+    pendingLogs.clear();
+  });
+}
+
+function setConsoleStatus(label: string, state: "idle" | "running" | "done" | "error"): void {
+  consoleStatus.textContent = label;
+  consoleStatus.dataset.state = state;
+}
 
 function showInstallationDir(path: string): void {
   installationDir = path;
@@ -127,7 +152,12 @@ function renderPackages(state: AppState): void {
     launch.type = "button";
     launch.disabled = item.running;
     launch.addEventListener("click", async () => {
-      try { await window.flow.launchWebUI(); notify("WebUI запускается."); await refreshState(); }
+      try {
+        await window.flow.launchWebUI();
+        notify("WebUI запускается. Логи доступны на главном экране.");
+        element<HTMLElement>("console-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+        await refreshState();
+      }
       catch (error) { notify(message(error)); }
     });
     const settings = make("button", "secondary-button", "Настроить");
@@ -234,16 +264,30 @@ async function searchModels(): Promise<void> {
 }
 
 function onTask(event: TaskEvent): void {
+  if (event.kind === "install" || event.kind === "launch") {
+    queueLog(terminal, `[${event.kind === "install" ? "Установка" : "WebUI"}] ${event.message}`);
+  }
   if (event.kind === "install") {
-    element<HTMLElement>("install-step").textContent = event.phase === "done" ? "Установка завершена" : event.phase === "error" ? "Ошибка установки" : event.message.trim().slice(0, 120);
-    log.textContent += `${event.message.replace(/\r/g, "\n")}${event.message.endsWith("\n") ? "" : "\n"}`;
-    if (log.textContent.length > 80_000) log.textContent = log.textContent.slice(-60_000);
-    log.scrollTop = log.scrollHeight;
+    queueLog(log, event.message);
+    if (event.phase !== "log") {
+      element<HTMLElement>("install-step").textContent = event.phase === "done" ? "Установка завершена" : event.phase === "error" ? "Ошибка установки" : event.message.trim().slice(0, 120);
+    }
+    if (["checking", "cloning", "venv", "dependencies"].includes(event.phase)) setConsoleStatus("Установка", "running");
     if (["done", "error", "cancelled"].includes(event.phase)) {
+      setConsoleStatus(event.phase === "done" ? "Установлено" : event.phase === "cancelled" ? "Отменено" : "Ошибка установки", event.phase === "done" ? "done" : "error");
       installing = false;
       element<HTMLButtonElement>("start-install").disabled = false;
       if (event.phase === "done") { notify("WebUI установлен."); void refreshState(); }
       else notify(event.message);
+    }
+    return;
+  }
+  if (event.kind === "launch") {
+    if (event.phase === "running") setConsoleStatus("WebUI работает", "running");
+    if (event.phase === "done" || event.phase === "error") {
+      setConsoleStatus(event.phase === "done" ? "WebUI остановлен" : "Ошибка WebUI", event.phase === "done" ? "done" : "error");
+      if (event.phase === "error") notify(event.message);
+      void refreshState();
     }
     return;
   }
@@ -299,10 +343,16 @@ element<HTMLButtonElement>("start-install").addEventListener("click", async () =
   if (installing) return;
   if (!installationDir) { notify("Сначала выберите папку установки."); return; }
   installing = true;
+  pendingLogs.delete(log);
   log.textContent = "";
   element<HTMLButtonElement>("start-install").disabled = true;
   try { await window.flow.installWebUI(installationDir); }
   catch (error) { installing = false; element<HTMLButtonElement>("start-install").disabled = false; notify(message(error)); }
+});
+element<HTMLButtonElement>("clear-terminal").addEventListener("click", () => {
+  pendingLogs.delete(terminal);
+  terminalHasOutput = true;
+  terminal.textContent = "";
 });
 element<HTMLButtonElement>("cancel-install").addEventListener("click", async () => {
   if (installing) await window.flow.cancelInstall(); else installDialog.close();
