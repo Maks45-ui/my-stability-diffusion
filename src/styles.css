@@ -13,6 +13,13 @@
   --blue-dark: #2179b7;
   --green: #72dfb5;
   --shadow: 0 18px 50px rgba(0, 0, 0, .22);
+  --splash-bg: #101923;
+  --splash-glow: rgba(46, 151, 220, .2);
+  --download-card: #263341;
+  --download-track: #152534;
+  --success: #60d6a5;
+  --warning: #efc178;
+  --danger: #ff9198;
 }
 
 html[data-theme="light"] {
@@ -28,11 +35,50 @@ html[data-theme="light"] {
   --blue-dark: #1b6ba4;
   --green: #2aa57a;
   --shadow: 0 15px 40px rgba(40, 82, 122, .09);
+  --splash-bg: #f4f9fd;
+  --splash-glow: rgba(39, 144, 215, .16);
+  --download-card: #f8fbfe;
+  --download-track: #d8e8f3;
+  --success: #24996e;
+  --warning: #a56b20;
+  --danger: #bf5264;
 }
+
+.splash-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--splash-bg);
+  color: var(--text);
+  isolation: isolate;
+  transition: opacity .55s ease, visibility .55s ease;
+}
+.splash-glow {
+  position: absolute;
+  z-index: -1;
+  width: min(68vw, 760px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--splash-glow), transparent 68%);
+  filter: blur(24px);
+}
+.splash-brand { display: flex; align-items: center; gap: 16px; }
+.splash-brand img { width: clamp(92px, 10vw, 128px); height: clamp(92px, 10vw, 128px); object-fit: contain; animation: splash-logo-in .7s cubic-bezier(.2,.8,.2,1) both; }
+.splash-brand span { font-size: clamp(68px, 9vw, 112px); font-weight: 760; letter-spacing: -.075em; line-height: 1; animation: splash-word-in .85s cubic-bezier(.2,.8,.2,1) .4s both; }
+.splash-screen p { margin-top: 28px; color: var(--muted); font-size: 13px; letter-spacing: .18em; text-transform: uppercase; animation: splash-caption-in .6s ease 1.1s both; }
+.splash-screen.splash-leaving { opacity: 0; visibility: hidden; }
+@keyframes splash-logo-in { from { opacity: 0; transform: scale(.72) rotate(-9deg); } to { opacity: 1; transform: scale(1) rotate(0); } }
+@keyframes splash-word-in { from { opacity: 0; clip-path: inset(0 100% 0 0); transform: translateX(-42px); } to { opacity: 1; clip-path: inset(0 0 0 0); transform: translateX(0); } }
+@keyframes splash-caption-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
 * { box-sizing: border-box; }
 html, body, .sidebar, .main, .topbar, .panel, .stat-card, .model-card,
-.modal, .search-field, .setting-value, .download-status, .path-control input,
+.modal, .search-field, .setting-value, .download-card, .path-control input,
 .theme-toggle, .nav-item, .badge, .package-card, .file-select {
   transition: background-color .25s ease, color .25s ease, border-color .25s ease, box-shadow .25s ease;
 }
@@ -163,14 +209,42 @@ h1, h2, h3, p { margin: 0; }
 .file-select { min-width: 0; flex: 1; height: 36px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--surface); font-size: 11px; }
 .download-button { min-height: 36px; padding: 0 11px; font-size: 11px; white-space: nowrap; }
 .muted { color: var(--muted); font-size: 12px; }
-.download-status { margin-bottom: 21px; padding: 15px; border: 1px solid rgba(57,149,208,.35); border-radius: 12px; background: #20374a; }
-.download-status[hidden] { display: none; }
-.download-status-top { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 10px; font-size: 12px; }
-.download-status-top span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.text-button { background: none; border: 0; color: #8ccfff; font-size: 11px; }
-.text-button:hover { text-decoration: underline; }
-.progress-track { height: 6px; border-radius: 9px; background: #152635; overflow: hidden; }
-.progress-track div { width: 0%; height: 100%; background: linear-gradient(90deg,#2985c6,#72cbfa); transition: width .15s; }
+.downloads-panel { padding: 23px; margin-bottom: 23px; }
+.downloads-panel .panel-heading { margin-bottom: 17px; }
+.download-list { display: grid; gap: 12px; max-height: 470px; overflow: auto; scrollbar-width: thin; }
+.downloads-empty { padding: 23px; border: 1px dashed var(--line); border-radius: 13px; background: var(--surface); color: var(--muted); text-align: center; font-size: 12px; }
+.download-card { display: flex; gap: 14px; padding: 17px; min-width: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--download-card); box-shadow: 0 8px 20px rgba(0,0,0,.06); animation: download-card-in .3s ease both; transition: background-color .25s, border-color .25s, box-shadow .25s; }
+.download-card[data-status="downloading"] { border-color: rgba(57,149,208,.55); box-shadow: 0 10px 25px rgba(37,133,195,.12); }
+.download-card[data-status="completed"] { border-color: rgba(79,187,145,.35); }
+.download-card-icon { width: 44px; height: 44px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 12px; color: var(--blue); background: var(--surface); font-size: 24px; }
+.download-card-content { flex: 1; min-width: 0; }
+.download-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.download-card-title { min-width: 0; }
+.download-card-type { display: block; margin-bottom: 5px; color: var(--blue); font-size: 10px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.download-card-title h3 { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.download-card-title small { display: block; margin-top: 5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.download-badge { flex: 0 0 auto; padding: 7px 9px; border-radius: 8px; background: var(--surface); color: var(--muted); font-size: 10px; font-weight: 750; white-space: nowrap; animation: download-status-in .25s ease both; }
+.download-card[data-status="downloading"] .download-badge { background: rgba(51,145,206,.16); color: var(--blue); }
+.download-card[data-status="paused"] .download-badge, .download-card[data-status="pausing"] .download-badge { background: rgba(214,158,70,.15); color: var(--warning); }
+.download-card[data-status="completed"] .download-badge { background: rgba(63,181,131,.15); color: var(--success); }
+.download-card[data-status="error"] .download-badge { background: rgba(221,86,103,.15); color: var(--danger); }
+.download-metrics { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px 13px; margin-top: 14px; color: var(--muted); font-size: 11px; }
+.download-percent { color: var(--text); font-size: 18px; line-height: 1; }
+.download-speed { color: var(--blue); font-weight: 700; }
+.download-track { height: 9px; margin-top: 11px; border-radius: 999px; background: var(--download-track); overflow: hidden; }
+.download-fill { position: relative; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #1d7fbf, #52b8ee 58%, #87d8f6); box-shadow: 0 0 13px rgba(59,164,224,.4); transition: width .18s ease; }
+.download-card[data-status="completed"] .download-fill { background: linear-gradient(90deg, #2ba979, #70d9a8); }
+.download-card[data-status="downloading"] .download-fill::after { content: ""; position: absolute; inset: 0 auto 0 -40%; width: 40%; background: linear-gradient(90deg, transparent, rgba(255,255,255,.34), transparent); animation: download-shine 1.7s linear infinite; }
+.download-error { margin-top: 10px; color: var(--danger); font-size: 11px; }
+.download-error[hidden] { display: none; }
+.download-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.download-action { min-height: 31px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 11px; font-weight: 720; transition: transform .18s, border-color .18s, background-color .18s; }
+.download-action:hover { transform: translateY(-1px); border-color: var(--blue); }
+.download-action-primary { border-color: transparent; background: var(--blue); color: white; }
+.download-action-primary:hover { background: var(--blue-dark); }
+@keyframes download-card-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes download-status-in { from { opacity: .45; transform: translateY(4px) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes download-shine { to { left: 110%; } }
 
 .settings-panel { max-width: 760px; padding: 7px 25px; }
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 25px; padding: 21px 0; border-bottom: 1px solid var(--line); }
@@ -206,7 +280,6 @@ html[data-theme="light"] .model-image { background: linear-gradient(135deg, #e9f
 html[data-theme="light"] .model-type { background: #e2f0fb; color: #1c6ea8; }
 html[data-theme="light"] .file-select { background: #eef5fb; }
 html[data-theme="light"] .setting-value { background: #e1f0fb; color: #206fa6; }
-html[data-theme="light"] .download-status { background: #e8f4fd; border-color: #a8d3ed; }
 html[data-theme="light"] .modal { background: #fff; border-color: #cfdfeb; }
 html[data-theme="light"] .package-state { background: #e0f7ee; color: #208b64; }
 html[data-theme="light"] .nav-item:hover { background: rgba(33, 125, 188, .09); }

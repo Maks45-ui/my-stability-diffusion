@@ -43,6 +43,12 @@ pub(crate) struct TaskEvent {
     pub percent: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bytes_per_second: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes_downloaded: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_bytes: Option<u64>,
 }
 
 pub(crate) fn emit_task(app: &AppHandle, event: TaskEvent) {
@@ -167,10 +173,12 @@ pub fn run() {
             installer::open_package_settings,
             civitai::search_models,
             civitai::download_model,
+            civitai::pause_download,
             civitai::cancel_download,
+            civitai::list_downloads,
+            civitai::delete_download,
             civitai::get_preview
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Flow");
 }
-

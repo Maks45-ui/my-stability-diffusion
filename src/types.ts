@@ -1,5 +1,5 @@
 export type Page = "home" | "gallery" | "models" | "settings";
-export type TaskPhase = "idle" | "checking" | "cloning" | "venv" | "dependencies" | "done" | "error" | "cancelled";
+export type TaskPhase = "idle" | "checking" | "cloning" | "venv" | "dependencies" | "paused" | "done" | "error" | "cancelled";
 
 export interface PackageInfo {
   name: string;
@@ -21,6 +21,15 @@ export interface ModelFile {
   sizeKb: number;
 }
 
+export interface DownloadedFile {
+  name: string;
+  modelType: string;
+  sizeBytes: number;
+  downloadedBytes: number;
+  status: "completed" | "paused";
+  downloadUrl: string | null;
+}
+
 export interface ModelSummary {
   id: number;
   name: string;
@@ -35,6 +44,9 @@ export interface TaskEvent {
   message: string;
   percent?: number;
   bytesPerSecond?: number;
+  taskId?: string;
+  bytesDownloaded?: number;
+  totalBytes?: number;
 }
 
 export interface FlowAPI {
@@ -46,8 +58,11 @@ export interface FlowAPI {
   launchWebUI(): Promise<void>;
   openPackageSettings(): Promise<void>;
   searchModels(query: string): Promise<ModelSummary[]>;
-  downloadModel(file: ModelFile, type: string): Promise<void>;
+  downloadModel(file: ModelFile, type: string, taskId: string, resume: boolean): Promise<void>;
+  pauseDownload(): Promise<void>;
   cancelDownload(): Promise<void>;
+  listDownloads(): Promise<DownloadedFile[]>;
+  deleteDownload(modelType: string, fileName: string): Promise<void>;
   getPreview(url: string): Promise<string>;
   saveCivitaiToken(token: string): Promise<void>;
   setPage(page: Page): Promise<void>;

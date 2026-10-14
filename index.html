@@ -7,7 +7,12 @@
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
-  <div class="app-shell">
+  <div class="splash-screen" id="splash-screen" role="status" aria-label="Запуск Flow">
+    <div class="splash-glow" aria-hidden="true"></div>
+    <div class="splash-brand"><img src="/assets/logo.png" alt="" /><span>Flow</span></div>
+    <p>Творчество начинается здесь</p>
+  </div>
+  <div class="app-shell" id="app-shell">
     <aside class="sidebar" id="sidebar" aria-label="Навигация">
       <div class="sidebar-top">
         <button class="icon-button menu-toggle" id="menu-toggle" aria-label="Свернуть меню" title="Свернуть меню">☰</button>
@@ -47,7 +52,7 @@
         <section class="page" id="page-models" aria-labelledby="models-title">
           <div class="page-heading"><div><span class="eyebrow">КАТАЛОГ CIVITAI</span><h1 id="models-title">Загрузка моделей</h1><p>Находите модели, смотрите примеры и загружайте файлы.</p></div><span class="page-symbol">↓</span></div>
           <div class="search-row"><label class="search-field"><span>⌕</span><input id="model-search" type="search" placeholder="Поиск по названию или ID модели" autocomplete="off" aria-label="Поиск моделей" /></label><button class="primary-button search-button" id="search-button">Найти</button></div>
-          <div class="download-status" id="download-status" hidden><div class="download-status-top"><span id="download-label">Загрузка…</span><button class="text-button" id="cancel-download">Отменить</button></div><div class="progress-track"><div id="download-progress"></div></div></div>
+          <section class="panel downloads-panel" aria-labelledby="downloads-title"><div class="panel-heading"><div><span class="eyebrow">МЕНЕДЖЕР МОДЕЛЕЙ</span><h2 id="downloads-title">Ваши загрузки</h2></div><span class="badge" id="download-count">0 файлов</span></div><div class="download-list" id="download-list" aria-live="polite"></div></section>
           <div class="catalog-status" id="catalog-status">Откройте каталог или введите запрос.</div><div class="model-grid" id="model-grid"></div>
         </section>
 

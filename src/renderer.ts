@@ -1,4 +1,6 @@
 import { flowApi } from "./bridge";
+import { DownloadManager } from "./download-manager";
+import { startSplashScreen } from "./splash";
 import type { AppState, ModelSummary, Page, TaskEvent, Theme, ThemeState } from "./types";
 
 window.flow = flowApi;
@@ -20,6 +22,12 @@ const packageList = element<HTMLElement>("package-list");
 const modelGrid = element<HTMLElement>("model-grid");
 const catalogStatus = element<HTMLElement>("catalog-status");
 const searchInput = element<HTMLInputElement>("model-search");
+const downloadManager = new DownloadManager(
+  flowApi,
+  element<HTMLElement>("download-list"),
+  element<HTMLElement>("download-count"),
+  notify
+);
 let hasLoadedCatalog = false;
 let searchSequence = 0;
 let debounceTimer: number | undefined;
@@ -208,14 +216,10 @@ function renderModel(model: ModelSummary): HTMLElement {
     }
     const button = make("button", "download-button", "Скачать ↓");
     button.type = "button";
-    button.addEventListener("click", async () => {
+    button.addEventListener("click", () => {
       const file = model.files[Number(select.value)];
       if (!file) return;
-      try {
-        await window.flow.downloadModel(file, model.type);
-        element<HTMLElement>("download-status").hidden = false;
-        element<HTMLElement>("download-label").textContent = `Загрузка ${file.name}…`;
-      } catch (error) { notify(message(error)); }
+      downloadManager.enqueue(file, model.type, model.name);
     });
     footer.append(select, button);
   } else footer.append(make("span", "muted", "Файлы недоступны"));
@@ -255,16 +259,7 @@ function onTask(event: TaskEvent): void {
     }
     return;
   }
-  const label = element<HTMLElement>("download-label");
-  const bar = element<HTMLElement>("download-progress");
-  element<HTMLElement>("download-status").hidden = false;
-  const speed = event.bytesPerSecond ? ` · ${(event.bytesPerSecond / 1024 / 1024).toFixed(1)} МБ/с` : "";
-  label.textContent = `${event.message}${event.percent === undefined ? "" : ` · ${event.percent}%`}${speed}`;
-  bar.style.width = `${event.percent ?? 0}%`;
-  if (["done", "error", "cancelled"].includes(event.phase)) {
-    notify(event.message);
-    window.setTimeout(() => { element<HTMLElement>("download-status").hidden = true; bar.style.width = "0%"; }, 3000);
-  }
+  downloadManager.onTask(event);
 }
 
 document.querySelectorAll<HTMLButtonElement>(".nav-item").forEach((button) => {
@@ -300,7 +295,6 @@ searchInput.addEventListener("input", () => {
   debounceTimer = window.setTimeout(() => void searchModels(), 400);
 });
 searchInput.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); void searchModels(); } });
-element<HTMLButtonElement>("cancel-download").addEventListener("click", () => void window.flow.cancelDownload());
 element<HTMLButtonElement>("browse-install-settings").addEventListener("click", () => void browseInstallationDir());
 element<HTMLButtonElement>("browse-install-dialog").addEventListener("click", () => void browseInstallationDir());
 element<HTMLButtonElement>("theme-toggle").addEventListener("click", () => applyTheme(theme.current === "dark" ? "light" : "dark"));
@@ -313,6 +307,8 @@ element<HTMLFormElement>("token-form").addEventListener("submit", async (event) 
 window.addEventListener("resize", updateIndicator);
 void window.flow.onTask(onTask).catch((error: unknown) => notify(message(error)));
 applyTheme(theme.current);
+startSplashScreen();
 void refreshState();
+void downloadManager.restore().catch((error: unknown) => notify(message(error)));
 void window.flow.setPage("home").catch(() => { /* Discord may be unavailable. */ });
 window.requestAnimationFrame(updateIndicator);

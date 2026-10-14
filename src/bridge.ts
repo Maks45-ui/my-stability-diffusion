@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AppState, FlowAPI, ModelFile, ModelSummary, Page, TaskEvent } from "./types";
+import type { AppState, DownloadedFile, FlowAPI, ModelFile, ModelSummary, Page, TaskEvent } from "./types";
 
 // The UI only knows this typed contract. System access stays in Rust.
 export const flowApi: FlowAPI = {
@@ -11,8 +11,11 @@ export const flowApi: FlowAPI = {
   launchWebUI: () => invoke<void>("launch_web_ui"),
   openPackageSettings: () => invoke<void>("open_package_settings"),
   searchModels: (query: string) => invoke<ModelSummary[]>("search_models", { query }),
-  downloadModel: (file: ModelFile, type: string) => invoke<void>("download_model", { file, modelType: type }),
+  downloadModel: (file: ModelFile, type: string, taskId: string, resume: boolean) => invoke<void>("download_model", { file, modelType: type, taskId, resume }),
+  pauseDownload: () => invoke<void>("pause_download"),
   cancelDownload: () => invoke<void>("cancel_download"),
+  listDownloads: () => invoke<DownloadedFile[]>("list_downloads"),
+  deleteDownload: (modelType: string, fileName: string) => invoke<void>("delete_download", { modelType, fileName }),
   getPreview: (url: string) => invoke<string>("get_preview", { url }),
   saveCivitaiToken: (token: string) => invoke<void>("save_civitai_token", { token }),
   saveInstallationDirectory: (directory: string) => invoke<void>("set_installation_dir", { directory }),

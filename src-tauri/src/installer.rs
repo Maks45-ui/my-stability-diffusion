@@ -38,6 +38,7 @@ impl WebuiControl {
 fn notify(app: &AppHandle, phase: &'static str, message: impl Into<String>) {
     emit_task(app, TaskEvent {
         kind: "install", phase, message: message.into(), percent: None, bytes_per_second: None,
+        task_id: None, bytes_downloaded: None, total_bytes: None,
     });
 }
 
