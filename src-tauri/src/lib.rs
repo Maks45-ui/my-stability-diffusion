@@ -14,6 +14,8 @@ struct Settings {
     civitai_token: String,
     #[serde(default)]
     installation_dir: Option<String>,
+    #[serde(default)]
+    webui_arguments: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -91,6 +93,10 @@ pub(crate) fn installation_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(paths::subprocess_path(&default))
 }
 
+pub(crate) fn webui_arguments(app: &AppHandle) -> Result<Vec<String>, String> {
+    Ok(read_settings(app)?.webui_arguments)
+}
+
 pub(crate) fn civitai_token(app: &AppHandle) -> Result<String, String> {
     let env = std::env::var("CIVITAI_API_KEY").unwrap_or_default();
     if !env.trim().is_empty() {
@@ -152,6 +158,21 @@ fn save_civitai_token(app: AppHandle, token: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_webui_arguments(app: AppHandle) -> Result<Vec<String>, String> {
+    webui_arguments(&app)
+}
+
+#[tauri::command]
+fn save_webui_arguments(app: AppHandle, arguments: Vec<String>) -> Result<Vec<String>, String> {
+    installer::parse_webui_arguments(&arguments)?;
+    let normalized: Vec<String> = arguments.into_iter().map(|argument| argument.trim().to_owned()).collect();
+    let mut settings = read_settings(&app)?;
+    settings.webui_arguments = normalized.clone();
+    write_settings(&app, &settings)?;
+    Ok(normalized)
+}
+
+#[tauri::command]
 fn set_page(page: String) {
     discord::set_page(&page);
 }
@@ -167,11 +188,12 @@ pub fn run() {
             get_state,
             set_installation_dir,
             save_civitai_token,
+            get_webui_arguments,
+            save_webui_arguments,
             set_page,
             installer::install_web_ui,
             installer::cancel_install,
             installer::launch_web_ui,
-            installer::open_package_settings,
             civitai::search_models,
             civitai::download_model,
             civitai::pause_download,

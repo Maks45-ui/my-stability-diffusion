@@ -5,6 +5,7 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    collections::HashSet,
     sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex},
     thread,
     time::Duration,
@@ -208,6 +209,43 @@ fn run_logged_retry_locked(app: &AppHandle, control: &InstallControl, program: &
     unreachable!("цикл всегда возвращает результат последней попытки")
 }
 
+pub(crate) fn parse_webui_arguments(entries: &[String]) -> Result<Vec<String>, String> {
+    if entries.len() > 32 { return Err("Можно сохранить не более 32 аргументов WebUI.".to_owned()); }
+    let mut parsed = Vec::with_capacity(entries.len() * 2);
+    let mut names = HashSet::new();
+    for raw in entries {
+        let entry = raw.trim();
+        if entry.is_empty() || entry.len() > 256 || entry.chars().any(char::is_control) {
+            return Err("Аргумент должен содержать от 1 до 256 символов без переноса строки.".to_owned());
+        }
+        let flag_end = entry.char_indices().find(|(_, character)| character.is_whitespace()).map_or(entry.len(), |(index, _)| index);
+        let flag = &entry[..flag_end];
+        let name = flag.split_once('=').map_or(flag, |(name, _)| name);
+        if !name.starts_with("--") || !name[2..].bytes().next().is_some_and(|byte| byte.is_ascii_alphabetic())
+            || !name[2..].bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_') {
+            return Err(format!("Некорректный аргумент: {entry}. Используйте формат --имя или --имя значение."));
+        }
+        if !names.insert(name.to_ascii_lowercase()) {
+            return Err(format!("Аргумент {name} уже добавлен."));
+        }
+        let value = entry[flag_end..].trim();
+        if let Some((_, inline_value)) = flag.split_once('=') {
+            if inline_value.is_empty() || !value.is_empty() {
+                return Err(format!("Укажите одно значение для {name}."));
+            }
+        }
+        parsed.push(flag.to_owned());
+        if !value.is_empty() {
+            let unquoted = value.strip_prefix('"').and_then(|part| part.strip_suffix('"')).unwrap_or(value);
+            if unquoted.is_empty() || unquoted.starts_with("--") || unquoted.contains('"') {
+                return Err(format!("Некорректное значение для {name}. Добавляйте флаги по одному."));
+            }
+            parsed.push(unquoted.to_owned());
+        }
+    }
+    Ok(parsed)
+}
+
 fn ensure_local_clip_source(app: &AppHandle, control: &InstallControl, directory: &Path, folder: &str, url: &str, revision: &str) -> Result<PathBuf, String> {
     let repositories = directory.join("repositories");
     fs::create_dir_all(&repositories).map_err(|error| error.to_string())?;
@@ -298,12 +336,6 @@ fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(
         return Err("После установки WebUI модули CLIP или open_clip недоступны в виртуальном окружении.".to_owned());
     }
     let version = command_output(app, "git", &["-C".to_owned(), directory.to_string_lossy().into_owned(), "describe".to_owned(), "--tags".to_owned(), "--always".to_owned()]).unwrap_or_else(|_| "Установлен".to_owned());
-    #[cfg(windows)] {
-        let settings = directory.join("webui.settings.bat");
-        if !settings.exists() {
-            fs::write(&settings, format!("@echo off\r\nset PYTHON=\"{}\"\r\nset STABLE_DIFFUSION_REPO={}\r\n", venv_python.display(), SD_REPO)).map_err(|error| error.to_string())?;
-        }
-    }
     fs::write(directory.join(".flow-installed.json"), json!({ "name": "AUTOMATIC1111 WebUI", "version": version }).to_string()).map_err(|error| error.to_string())?;
     notify(app, "done", "AUTOMATIC1111 WebUI установлен.");
     Ok(())
@@ -356,19 +388,14 @@ pub(crate) fn cancel_install(app: AppHandle, state: State<'_, Arc<InstallControl
 pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) -> Result<(), String> {
     let directory = installation_dir(&app)?.join("sd-webui");
     if !directory.join(".flow-installed.json").is_file() { return Err("Сначала установите пакет.".to_owned()); }
-    let mut command = if cfg!(windows) {
-        let script = directory.join("webui-user.bat");
-        if !script.is_file() { return Err("Файл запуска WebUI не найден.".to_owned()); }
-        let mut command = Command::new("cmd.exe");
-        command.arg("/c").arg(script);
-        command
-    } else {
-        let script = directory.join("webui.sh");
-        if !script.is_file() { return Err("Файл запуска WebUI не найден.".to_owned()); }
-        let mut command = Command::new("bash");
-        command.arg(script);
-        command
-    };
+    if !directory.join("launch.py").is_file() { return Err("Файл запуска WebUI не найден.".to_owned()); }
+    let python = if cfg!(windows) { directory.join("venv/Scripts/python.exe") } else { directory.join("venv/bin/python") };
+    if !python.is_file() { return Err("Виртуальное окружение WebUI не найдено.".to_owned()); }
+    let arguments = parse_webui_arguments(&crate::webui_arguments(&app)?)?;
+    // webui-user.bat clears COMMANDLINE_ARGS and does not forward its own arguments.
+    // Passing args directly to launch.py also avoids shell quoting and a visible CMD window.
+    let mut command = Command::new(python);
+    command.arg("-u").arg("launch.py").args(arguments);
     use_local_clip_sources(&mut command, &directory);
     command.current_dir(&directory)
         .env("PYTHONUNBUFFERED", "1")
@@ -399,16 +426,5 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) -> R
             Err(error) => notify_kind(&app, "launch", "error", format!("Ошибка процесса WebUI: {error}")),
         }
     });
-    Ok(())
-}
-
-#[tauri::command]
-pub(crate) fn open_package_settings(app: AppHandle) -> Result<(), String> {
-    let directory = installation_dir(&app)?.join("sd-webui");
-    if !directory.join(".flow-installed.json").is_file() { return Err("Сначала установите пакет.".to_owned()); }
-    #[cfg(windows)] let mut command = { let mut cmd = Command::new("notepad.exe"); cmd.arg(directory.join("webui.settings.bat")); cmd };
-    #[cfg(target_os = "macos")] let mut command = { let mut cmd = Command::new("open"); cmd.arg(&directory); cmd };
-    #[cfg(all(not(windows), not(target_os = "macos")))] let mut command = { let mut cmd = Command::new("xdg-open"); cmd.arg(&directory); cmd };
-    command.spawn().map_err(|error| error.to_string())?;
     Ok(())
 }

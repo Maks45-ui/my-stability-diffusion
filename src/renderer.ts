@@ -17,6 +17,11 @@ const navIndicator = element<HTMLElement>("nav-indicator");
 const nav = element<HTMLElement>("navigation");
 const toast = element<HTMLElement>("toast");
 const installDialog = element<HTMLDialogElement>("install-dialog");
+const webuiSettingsDialog = element<HTMLDialogElement>("webui-settings-dialog");
+const webuiArgInput = element<HTMLInputElement>("webui-arg-input");
+const webuiArgList = element<HTMLElement>("webui-arg-list");
+const webuiSettingsState = element<HTMLElement>("webui-settings-state");
+const webuiSaveButton = element<HTMLButtonElement>("save-webui-settings");
 const imageDialog = element<HTMLDialogElement>("image-dialog");
 const terminal = element<HTMLElement>("terminal-log");
 const consolePanel = element<HTMLElement>("console-panel");
@@ -48,6 +53,9 @@ let installing = false;
 let installationDir = "";
 let logFrame: number | undefined;
 let terminalHasOutput = false;
+let webuiDraft: string[] = [];
+let webuiSettingsRequest = 0;
+let webuiSettingsReady = false;
 const pendingLogs = new Map<HTMLElement, string>();
 
 function queueLog(target: HTMLElement, message: string): void {
@@ -123,6 +131,78 @@ function make<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string,
   return node;
 }
 
+function webuiArgumentName(argument: string): string {
+  return (argument.trim().split(/[=\s]/, 1)[0] ?? "").toLowerCase();
+}
+
+function setWebuiSettingsMessage(value: string, error = false): void {
+  webuiSettingsState.textContent = value;
+  webuiSettingsState.classList.toggle("error", error);
+}
+
+function renderWebuiArguments(): void {
+  webuiArgList.replaceChildren();
+  if (webuiDraft.length === 0) webuiArgList.append(make("span", "webui-args-empty", "Аргументы пока не добавлены."));
+  for (const argument of webuiDraft) {
+    const chip = make("span", "webui-arg-chip");
+    const remove = make("button", "webui-arg-remove", "×");
+    remove.type = "button";
+    remove.setAttribute("aria-label", `Удалить аргумент ${argument}`);
+    remove.addEventListener("click", () => {
+      webuiDraft = webuiDraft.filter((item) => item !== argument);
+      renderWebuiArguments();
+      setWebuiSettingsMessage("Есть несохранённые изменения");
+    });
+    chip.append(make("code", "", argument), remove);
+    webuiArgList.append(chip);
+  }
+  document.querySelectorAll<HTMLButtonElement>(".webui-quick-arg").forEach((button) => {
+    button.setAttribute("aria-pressed", String(webuiDraft.some((item) => webuiArgumentName(item) === button.dataset.argument)));
+  });
+}
+
+function addWebuiArgument(raw: string): boolean {
+  if (!webuiSettingsReady) return false;
+  const argument = raw.trim().replace(/\s+/g, " ");
+  const [first, ...value] = argument.split(" ");
+  const flag = first ?? "";
+  const name = webuiArgumentName(argument);
+  if (argument.length > 256 || !/^--[A-Za-z][A-Za-z0-9_-]*(?:=\S+)?$/.test(flag) || (flag.includes("=") && value.length > 0) || value.join(" ").startsWith("--")) {
+    setWebuiSettingsMessage("Добавляйте по одному аргументу: --имя или --имя значение.", true);
+    return false;
+  }
+  if (webuiDraft.length >= 32) { setWebuiSettingsMessage("Можно сохранить не более 32 аргументов.", true); return false; }
+  if (webuiDraft.some((item) => webuiArgumentName(item) === name)) { setWebuiSettingsMessage("Этот аргумент уже добавлен.", true); return false; }
+  webuiDraft.push(argument);
+  renderWebuiArguments();
+  setWebuiSettingsMessage("Есть несохранённые изменения");
+  return true;
+}
+
+async function openWebuiSettings(): Promise<void> {
+  if (webuiSettingsDialog.open) return;
+  webuiSettingsDialog.showModal();
+  webuiSettingsReady = false;
+  webuiSaveButton.disabled = true;
+  webuiArgInput.disabled = true;
+  webuiArgInput.value = "";
+  webuiDraft = [];
+  renderWebuiArguments();
+  setWebuiSettingsMessage("Загрузка настроек…");
+  const request = ++webuiSettingsRequest;
+  try {
+    const saved = await window.flow.getWebUIArguments();
+    if (request !== webuiSettingsRequest || !webuiSettingsDialog.open) return;
+    webuiDraft = [...saved];
+    webuiSettingsReady = true;
+    webuiSaveButton.disabled = false;
+    webuiArgInput.disabled = false;
+    renderWebuiArguments();
+    setWebuiSettingsMessage("Настройки загружены");
+    webuiArgInput.focus();
+  } catch (error) { setWebuiSettingsMessage(message(error), true); }
+}
+
 function updateIndicator(): void {
   const active = nav.querySelector<HTMLButtonElement>(".nav-item.active");
   if (!active) return;
@@ -184,11 +264,10 @@ function renderPackages(state: AppState): void {
         notify(message(error));
       }
     });
-    const settings = make("button", "secondary-button", "Настроить");
+    const settings = make("button", "secondary-button", "Настройки");
     settings.type = "button";
-    settings.addEventListener("click", async () => {
-      try { await window.flow.openPackageSettings(); } catch (error) { notify(message(error)); }
-    });
+    settings.prepend(make("span", "package-settings-icon", "⚙"));
+    settings.addEventListener("click", () => void openWebuiSettings());
     actions.append(launch, settings);
     card.append(actions);
     packageList.append(card);
@@ -388,6 +467,40 @@ element<HTMLButtonElement>("clear-terminal").addEventListener("click", () => {
   terminal.textContent = "";
 });
 element<HTMLButtonElement>("cancel-install").addEventListener("click", () => installDialog.close());
+element<HTMLFormElement>("webui-arg-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (addWebuiArgument(webuiArgInput.value)) webuiArgInput.value = "";
+});
+document.querySelectorAll<HTMLButtonElement>(".webui-quick-arg").forEach((button) => {
+  button.addEventListener("click", () => {
+    const argument = button.dataset.argument;
+    if (!argument || !webuiSettingsReady) return;
+    if (webuiDraft.some((item) => webuiArgumentName(item) === argument)) {
+      webuiDraft = webuiDraft.filter((item) => webuiArgumentName(item) !== argument);
+      renderWebuiArguments();
+      setWebuiSettingsMessage("Есть несохранённые изменения");
+    } else addWebuiArgument(argument);
+  });
+});
+element<HTMLButtonElement>("close-webui-settings").addEventListener("click", () => webuiSettingsDialog.close());
+element<HTMLButtonElement>("cancel-webui-settings").addEventListener("click", () => webuiSettingsDialog.close());
+webuiSettingsDialog.addEventListener("close", () => { ++webuiSettingsRequest; webuiSettingsReady = false; });
+webuiSaveButton.addEventListener("click", async () => {
+  if (!webuiSettingsReady) return;
+  const request = webuiSettingsRequest;
+  const argumentsToSave = [...webuiDraft];
+  webuiSaveButton.disabled = true;
+  try {
+    await window.flow.saveWebUIArguments(argumentsToSave);
+    if (request === webuiSettingsRequest && webuiSettingsDialog.open) webuiSettingsDialog.close();
+    notify("Аргументы WebUI сохранены. Они применятся при следующем запуске.");
+  } catch (error) {
+    if (request === webuiSettingsRequest && webuiSettingsDialog.open) {
+      setWebuiSettingsMessage(message(error), true);
+      webuiSaveButton.disabled = false;
+    }
+  }
+});
 consoleCancel.addEventListener("click", async () => {
   if (!installing) return;
   consoleCancel.disabled = true;

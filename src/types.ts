@@ -56,7 +56,8 @@ export interface FlowAPI {
   saveInstallationDirectory(directory: string): Promise<void>;
   cancelInstall(): Promise<void>;
   launchWebUI(): Promise<void>;
-  openPackageSettings(): Promise<void>;
+  getWebUIArguments(): Promise<string[]>;
+  saveWebUIArguments(argumentsList: string[]): Promise<string[]>;
   searchModels(query: string): Promise<ModelSummary[]>;
   downloadModel(file: ModelFile, type: string, taskId: string, resume: boolean): Promise<void>;
   pauseDownload(): Promise<void>;

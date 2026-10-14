@@ -87,6 +87,17 @@
   </section>
 
   <dialog class="modal glass-surface" id="install-dialog"><div class="modal-header"><div><span class="eyebrow">УСТАНОВКА ПАКЕТА</span><h2>AUTOMATIC1111 WebUI</h2></div><button class="icon-button" id="close-install" aria-label="Закрыть">×</button></div><p>Flow проверит Git и Python 3.10, загрузит WebUI и создаст отдельное окружение. Логи откроются при запуске установки.</p><div class="install-location"><label for="install-dir-dialog">Папка установки</label><div class="path-control"><input id="install-dir-dialog" type="text" readonly placeholder="Выберите папку" /><button id="browse-install-dialog" class="secondary-button" type="button">Обзор...</button></div><small>Пакет будет установлен в подпапку sd-webui.</small></div><div class="modal-actions"><button class="secondary-button" id="cancel-install">Отменить</button><button class="primary-button" id="start-install">Начать установку</button></div></dialog>
+  <dialog class="modal glass-surface webui-settings-modal" id="webui-settings-dialog" aria-labelledby="webui-settings-title">
+    <div class="modal-header"><div><span class="eyebrow">ПАРАМЕТРЫ ПАКЕТА</span><h2 id="webui-settings-title">WebUI Settings</h2></div><button class="icon-button" id="close-webui-settings" type="button" aria-label="Закрыть настройки">×</button></div>
+    <p>Настройте аргументы запуска AUTOMATIC1111 WebUI. Изменения применятся при следующем запуске пакета.</p>
+    <section class="webui-args-card glass-surface" aria-labelledby="webui-args-title">
+      <div class="webui-args-heading"><span class="webui-args-icon" aria-hidden="true">⌘</span><div><h3 id="webui-args-title">Аргументы запуска</h3><span>CLI Arguments</span></div></div>
+      <form class="webui-arg-form" id="webui-arg-form"><label for="webui-arg-input">Добавить аргумент</label><div class="webui-arg-entry"><input id="webui-arg-input" type="text" maxlength="256" autocomplete="off" placeholder="Например, --lowvram или --theme dark" /><button class="primary-button" type="submit">Добавить</button></div></form>
+      <div class="webui-arg-list" id="webui-arg-list" aria-live="polite"></div>
+      <div class="webui-quick-args"><span>Популярные:</span><button class="webui-quick-arg" type="button" data-argument="--lowvram">--lowvram</button><button class="webui-quick-arg" type="button" data-argument="--medvram">--medvram</button><button class="webui-quick-arg" type="button" data-argument="--xformers">--xformers</button><button class="webui-quick-arg" type="button" data-argument="--api">--api</button><button class="webui-quick-arg" type="button" data-argument="--listen">--listen</button></div>
+    </section>
+    <div class="webui-settings-footer"><span class="webui-settings-state" id="webui-settings-state" role="status" aria-live="polite">Загрузка настроек…</span><div class="modal-actions"><button class="secondary-button" id="cancel-webui-settings" type="button">Отмена</button><button class="primary-button" id="save-webui-settings" type="button" disabled>Сохранить</button></div></div>
+  </dialog>
   <dialog class="modal image-modal glass-surface" id="image-dialog"><button class="icon-button image-close" id="close-image" aria-label="Закрыть">×</button><img id="full-image" alt="Пример изображения модели" /></dialog>
   <script src="/src/renderer.ts" type="module"></script>
 </body>
