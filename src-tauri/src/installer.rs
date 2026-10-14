@@ -96,7 +96,18 @@ fn python_310(app: &AppHandle) -> Result<(String, Vec<String>), String> {
     Err("Не найден Python 3.10. Установите его и перезапустите Flow.".to_owned())
 }
 
-fn pipe_logs(app: AppHandle, kind: &'static str, phase: &'static str, mut reader: impl Read + Send + 'static) -> thread::JoinHandle<()> {
+fn emit_pipe_line(app: &AppHandle, kind: &'static str, phase: &'static str, line: &[u8], locked_file: Option<&AtomicBool>) {
+    let message = String::from_utf8_lossy(line).into_owned();
+    if let Some(locked_file) = locked_file {
+        let lower = message.to_ascii_lowercase();
+        if lower.contains(".deleteme") || lower.contains("winerror 32") {
+            locked_file.store(true, Ordering::SeqCst);
+        }
+    }
+    notify_kind(app, kind, phase, message);
+}
+
+fn pipe_logs(app: AppHandle, kind: &'static str, phase: &'static str, mut reader: impl Read + Send + 'static, locked_file: Option<Arc<AtomicBool>>) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut buffer = [0_u8; 4096];
         let mut line = Vec::new();
@@ -105,23 +116,23 @@ fn pipe_logs(app: AppHandle, kind: &'static str, phase: &'static str, mut reader
             for &byte in &buffer[..count] {
                 if byte == b'\n' || byte == b'\r' {
                     if !line.is_empty() {
-                        notify_kind(&app, kind, phase, String::from_utf8_lossy(&line).into_owned());
+                        emit_pipe_line(&app, kind, phase, &line, locked_file.as_deref());
                         line.clear();
                     }
                 } else {
                     line.push(byte);
                     if line.len() >= 16_384 {
-                        notify_kind(&app, kind, phase, String::from_utf8_lossy(&line).into_owned());
+                        emit_pipe_line(&app, kind, phase, &line, locked_file.as_deref());
                         line.clear();
                     }
                 }
             }
         }
-        if !line.is_empty() { notify_kind(&app, kind, phase, String::from_utf8_lossy(&line).into_owned()); }
+        if !line.is_empty() { emit_pipe_line(&app, kind, phase, &line, locked_file.as_deref()); }
     })
 }
 
-fn run_logged(app: &AppHandle, control: &InstallControl, program: &str, args: &[String], cwd: &Path) -> Result<(), String> {
+fn run_logged(app: &AppHandle, control: &InstallControl, program: &str, args: &[String], cwd: &Path, locked_file: Option<Arc<AtomicBool>>) -> Result<(), String> {
     if control.cancelled.load(Ordering::SeqCst) { return Err("Установка отменена.".to_owned()); }
     let mut command = Command::new(program);
     command.args(args).current_dir(cwd)
@@ -133,8 +144,8 @@ fn run_logged(app: &AppHandle, control: &InstallControl, program: &str, args: &[
     hide_console(&mut command);
     let mut child = command.spawn().map_err(|error| format!("Не удалось запустить {program}: {error}"))?;
     if let Ok(mut pid) = control.pid.lock() { *pid = Some(child.id()); }
-    let stdout = child.stdout.take().map(|pipe| pipe_logs(app.clone(), "install", "log", pipe));
-    let stderr = child.stderr.take().map(|pipe| pipe_logs(app.clone(), "install", "log", pipe));
+    let stdout = child.stdout.take().map(|pipe| pipe_logs(app.clone(), "install", "log", pipe, locked_file.clone()));
+    let stderr = child.stderr.take().map(|pipe| pipe_logs(app.clone(), "install", "log", pipe, locked_file));
     let status = loop {
         if control.cancelled.load(Ordering::SeqCst) {
             let _ = child.kill();
@@ -151,6 +162,25 @@ fn run_logged(app: &AppHandle, control: &InstallControl, program: &str, args: &[
     Ok(())
 }
 
+fn run_logged_retry_locked(app: &AppHandle, control: &InstallControl, program: &str, args: &[String], cwd: &Path) -> Result<(), String> {
+    const MAX_ATTEMPTS: usize = 3;
+    for attempt in 1..=MAX_ATTEMPTS {
+        let locked_file = Arc::new(AtomicBool::new(false));
+        match run_logged(app, control, program, args, cwd, Some(Arc::clone(&locked_file))) {
+            Ok(()) => return Ok(()),
+            Err(_) if cfg!(windows) && locked_file.load(Ordering::SeqCst) && attempt < MAX_ATTEMPTS && !control.cancelled.load(Ordering::SeqCst) => {
+                notify(app, "dependencies", format!("Windows заблокировал временный файл pip; повтор команды ({}/{MAX_ATTEMPTS})…", attempt + 1));
+                thread::sleep(Duration::from_secs(2));
+            }
+            Err(error) if locked_file.load(Ordering::SeqCst) => {
+                return Err(format!("{error} Временный файл .deleteme остался заблокирован после {attempt} попыток."));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("цикл всегда возвращает результат последней попытки")
+}
+
 fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(), String> {
     notify(app, "checking", "Проверка Git и Python 3.10…");
     command_output(app, "git", &["--version".to_owned()]).map_err(|_| "Git не найден. Установите Git и перезапустите Flow.".to_owned())?;
@@ -165,7 +195,7 @@ fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(
         }
         notify(app, "cloning", "Найден существующий репозиторий WebUI; продолжаю установку.");
     } else {
-        run_logged(app, control, "git", &["clone".to_owned(), "--progress".to_owned(), WEBUI_REPO.to_owned(), directory.to_string_lossy().into_owned()], parent)?;
+        run_logged(app, control, "git", &["clone".to_owned(), "--progress".to_owned(), WEBUI_REPO.to_owned(), directory.to_string_lossy().into_owned()], parent, None)?;
     }
     let venv = directory.join("venv");
     let venv_python = if cfg!(windows) { venv.join("Scripts").join("python.exe") } else { venv.join("bin").join("python") };
@@ -173,11 +203,14 @@ fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(
         notify(app, "venv", "Создание виртуального окружения…");
         let mut args = prefix;
         args.extend(["-m".to_owned(), "venv".to_owned(), venv.to_string_lossy().into_owned()]);
-        run_logged(app, control, &python, &args, &directory)?;
+        run_logged(app, control, &python, &args, &directory, None)?;
     }
     if !directory.join("launch.py").is_file() { return Err("Файл launch.py не найден.".to_owned()); }
+    notify(app, "dependencies", "Обновление pip в виртуальном окружении…");
+    run_logged_retry_locked(app, control, &venv_python.to_string_lossy(), &["-m".to_owned(), "pip".to_owned(), "install".to_owned(), "--upgrade".to_owned(), "pip".to_owned()], &directory)?;
     notify(app, "dependencies", "Установка зависимостей WebUI…");
-    run_logged(app, control, &venv_python.to_string_lossy(), &["-u".to_owned(), "launch.py".to_owned(), "--exit".to_owned(), "--skip-torch-cuda-test".to_owned()], &directory)?;
+    // launch.py installs requirements_versions.txt with WebUI's own torch configuration.
+    run_logged_retry_locked(app, control, &venv_python.to_string_lossy(), &["-u".to_owned(), "launch.py".to_owned(), "--exit".to_owned(), "--skip-torch-cuda-test".to_owned()], &directory)?;
     if control.cancelled.load(Ordering::SeqCst) { return Err("Установка отменена.".to_owned()); }
     let version = command_output(app, "git", &["-C".to_owned(), directory.to_string_lossy().into_owned(), "describe".to_owned(), "--tags".to_owned(), "--always".to_owned()]).unwrap_or_else(|_| "Установлен".to_owned());
     #[cfg(windows)] {
@@ -268,8 +301,8 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) -> R
     notify_kind(&app, "launch", "running", "WebUI запускается…");
     let running = Arc::clone(&webui.running);
     thread::spawn(move || {
-        let stdout = child.stdout.take().map(|pipe| pipe_logs(app.clone(), "launch", "log", pipe));
-        let stderr = child.stderr.take().map(|pipe| pipe_logs(app.clone(), "launch", "log", pipe));
+        let stdout = child.stdout.take().map(|pipe| pipe_logs(app.clone(), "launch", "log", pipe, None));
+        let stderr = child.stderr.take().map(|pipe| pipe_logs(app.clone(), "launch", "log", pipe, None));
         let result = child.wait();
         if let Some(handle) = stdout { let _ = handle.join(); }
         if let Some(handle) = stderr { let _ = handle.join(); }
