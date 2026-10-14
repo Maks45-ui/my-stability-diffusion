@@ -23,6 +23,9 @@ const webuiArgInput = element<HTMLInputElement>("webui-arg-input");
 const webuiArgList = element<HTMLElement>("webui-arg-list");
 const webuiSettingsState = element<HTMLElement>("webui-settings-state");
 const webuiSaveButton = element<HTMLButtonElement>("save-webui-settings");
+const sdxlMemoryProfile = element<HTMLInputElement>("sdxl-memory-profile");
+const xformersStatus = element<HTMLElement>("xformers-status");
+const installXformersButton = element<HTMLButtonElement>("install-xformers");
 const imageDialog = element<HTMLDialogElement>("image-dialog");
 const terminal = element<HTMLElement>("terminal-log");
 const consolePanel = element<HTMLElement>("console-panel");
@@ -65,6 +68,9 @@ let terminalHasOutput = false;
 let webuiDraft: string[] = [];
 let webuiSettingsRequest = 0;
 let webuiSettingsReady = false;
+let webuiSettingsDirty = false;
+const attentionFlags = new Set(["--xformers", "--opt-sub-quad-attention", "--opt-sdp-attention"]);
+const vramFlags = new Set(["--lowvram", "--medvram", "--medvram-sdxl"]);
 const pendingLogs = new Map<HTMLElement, string>();
 
 function queueLog(target: HTMLElement, message: string): void {
@@ -146,6 +152,7 @@ function webuiArgumentName(argument: string): string {
 }
 
 function setWebuiSettingsMessage(value: string, error = false): void {
+  if (value === "Есть несохранённые изменения") webuiSettingsDirty = true;
   webuiSettingsState.textContent = value;
   webuiSettingsState.classList.toggle("error", error);
 }
@@ -183,6 +190,8 @@ function addWebuiArgument(raw: string): boolean {
   }
   if (webuiDraft.length >= 32) { setWebuiSettingsMessage("Можно сохранить не более 32 аргументов.", true); return false; }
   if (webuiDraft.some((item) => webuiArgumentName(item) === name)) { setWebuiSettingsMessage("Этот аргумент уже добавлен.", true); return false; }
+  if (attentionFlags.has(name)) webuiDraft = webuiDraft.filter((item) => !attentionFlags.has(webuiArgumentName(item)));
+  if (vramFlags.has(name)) webuiDraft = webuiDraft.filter((item) => !vramFlags.has(webuiArgumentName(item)));
   webuiDraft.push(argument);
   renderWebuiArguments();
   setWebuiSettingsMessage("Есть несохранённые изменения");
@@ -193,20 +202,25 @@ async function openWebuiSettings(): Promise<void> {
   if (webuiSettingsDialog.open) return;
   webuiSettingsDialog.showModal();
   webuiSettingsReady = false;
+  webuiSettingsDirty = false;
   webuiSaveButton.disabled = true;
   webuiArgInput.disabled = true;
+  sdxlMemoryProfile.disabled = true;
   webuiArgInput.value = "";
   webuiDraft = [];
   renderWebuiArguments();
   setWebuiSettingsMessage("Загрузка настроек…");
   const request = ++webuiSettingsRequest;
   try {
-    const saved = await window.flow.getWebUIArguments();
+    const saved = await window.flow.getWebUISettings();
     if (request !== webuiSettingsRequest || !webuiSettingsDialog.open) return;
-    webuiDraft = [...saved];
+    webuiDraft = [...saved.arguments];
+    sdxlMemoryProfile.checked = saved.sdxlMemoryProfile;
     webuiSettingsReady = true;
+    webuiSettingsDirty = false;
     webuiSaveButton.disabled = false;
     webuiArgInput.disabled = false;
+    sdxlMemoryProfile.disabled = false;
     renderWebuiArguments();
     setWebuiSettingsMessage("Настройки загружены");
     webuiArgInput.focus();
@@ -475,8 +489,19 @@ async function searchModels(): Promise<void> {
 }
 
 function onTask(event: TaskEvent): void {
-  if (event.kind === "install" || event.kind === "launch") {
-    queueLog(terminal, `[${event.kind === "install" ? "Установка" : "WebUI"}] ${event.message}`);
+  if (event.kind === "install" || event.kind === "launch" || event.kind === "xformers") {
+    const label = event.kind === "install" ? "Установка" : event.kind === "xformers" ? "xformers" : "WebUI";
+    queueLog(terminal, `[${label}] ${event.message}`);
+  }
+  if (event.kind === "xformers") {
+    if (event.phase === "dependencies") setConsoleStatus("Установка xformers", "running");
+    if (["done", "error", "cancelled"].includes(event.phase)) {
+      setConsoleStatus(event.phase === "done" ? "xformers готов" : "Ошибка xformers", event.phase === "done" ? "done" : "error");
+      installXformersButton.disabled = false;
+      xformersStatus.textContent = event.message;
+      if (event.phase !== "done") notify(event.message);
+    }
+    return;
   }
   if (event.kind === "install") {
     if (["checking", "cloning", "venv", "dependencies"].includes(event.phase)) setConsoleStatus("Установка", "running");
@@ -597,16 +622,44 @@ document.querySelectorAll<HTMLButtonElement>(".webui-quick-arg").forEach((button
     } else addWebuiArgument(argument);
   });
 });
+element<HTMLButtonElement>("apply-sdxl-profile").addEventListener("click", () => {
+  if (!webuiSettingsReady) return;
+  webuiDraft = webuiDraft.filter((item) => !attentionFlags.has(webuiArgumentName(item)) && !vramFlags.has(webuiArgumentName(item)));
+  webuiDraft.push("--lowvram", "--opt-sub-quad-attention");
+  sdxlMemoryProfile.checked = true;
+  webuiSettingsDirty = true;
+  renderWebuiArguments();
+  setWebuiSettingsMessage("Профиль 4 ГБ подготовлен. Сохраните настройки и перезапустите WebUI.");
+});
+sdxlMemoryProfile.addEventListener("change", () => setWebuiSettingsMessage("Есть несохранённые изменения"));
+element<HTMLButtonElement>("check-xformers").addEventListener("click", async () => {
+  xformersStatus.textContent = "Проверка окружения…";
+  try { xformersStatus.textContent = `xformers ${await window.flow.checkXformers()} доступен`; }
+  catch (error) { xformersStatus.textContent = message(error); }
+});
+installXformersButton.addEventListener("click", async () => {
+  if (webuiSettingsDirty) { setWebuiSettingsMessage("Сначала сохраните изменения аргументов запуска.", true); return; }
+  installXformersButton.disabled = true;
+  webuiSettingsDialog.close();
+  setConsoleVisible(true);
+  setConsoleStatus("Установка xformers", "running");
+  try { await window.flow.installXformers(); }
+  catch (error) {
+    installXformersButton.disabled = false;
+    setConsoleStatus("Ошибка xformers", "error");
+    xformersStatus.textContent = message(error);
+  }
+});
 element<HTMLButtonElement>("close-webui-settings").addEventListener("click", () => webuiSettingsDialog.close());
 element<HTMLButtonElement>("cancel-webui-settings").addEventListener("click", () => webuiSettingsDialog.close());
 webuiSettingsDialog.addEventListener("close", () => { ++webuiSettingsRequest; webuiSettingsReady = false; });
 webuiSaveButton.addEventListener("click", async () => {
   if (!webuiSettingsReady) return;
   const request = webuiSettingsRequest;
-  const argumentsToSave = [...webuiDraft];
+  const settingsToSave = { arguments: [...webuiDraft], sdxlMemoryProfile: sdxlMemoryProfile.checked };
   webuiSaveButton.disabled = true;
   try {
-    await window.flow.saveWebUIArguments(argumentsToSave);
+    await window.flow.saveWebUISettings(settingsToSave);
     if (request === webuiSettingsRequest && webuiSettingsDialog.open) webuiSettingsDialog.close();
     notify("Аргументы WebUI сохранены. Они применятся при следующем запуске.");
   } catch (error) {

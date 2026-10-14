@@ -17,6 +17,15 @@ struct Settings {
     installation_dir: Option<String>,
     #[serde(default)]
     webui_arguments: Vec<String>,
+    #[serde(default)]
+    sdxl_memory_profile: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WebuiSettings {
+    arguments: Vec<String>,
+    sdxl_memory_profile: bool,
 }
 
 #[derive(Serialize)]
@@ -101,6 +110,10 @@ pub(crate) fn installation_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 pub(crate) fn webui_arguments(app: &AppHandle) -> Result<Vec<String>, String> {
     Ok(read_settings(app)?.webui_arguments)
+}
+
+pub(crate) fn sdxl_memory_profile(app: &AppHandle) -> Result<bool, String> {
+    Ok(read_settings(app)?.sdxl_memory_profile)
 }
 
 pub(crate) fn civitai_token(app: &AppHandle) -> Result<String, String> {
@@ -191,6 +204,22 @@ fn save_webui_arguments(app: AppHandle, arguments: Vec<String>) -> Result<Vec<St
 }
 
 #[tauri::command]
+fn get_webui_settings(app: AppHandle) -> Result<WebuiSettings, String> {
+    let settings = read_settings(&app)?;
+    Ok(WebuiSettings { arguments: settings.webui_arguments, sdxl_memory_profile: settings.sdxl_memory_profile })
+}
+
+#[tauri::command]
+fn save_webui_settings(app: AppHandle, settings: WebuiSettings) -> Result<WebuiSettings, String> {
+    installer::parse_webui_arguments(&settings.arguments)?;
+    let mut saved = read_settings(&app)?;
+    saved.webui_arguments = settings.arguments.into_iter().map(|argument| argument.trim().to_owned()).collect();
+    saved.sdxl_memory_profile = settings.sdxl_memory_profile;
+    write_settings(&app, &saved)?;
+    Ok(WebuiSettings { arguments: saved.webui_arguments, sdxl_memory_profile: saved.sdxl_memory_profile })
+}
+
+#[tauri::command]
 fn set_page(page: String) {
     discord::set_page(&page);
 }
@@ -211,6 +240,8 @@ pub fn run() {
             save_civitai_token,
             get_webui_arguments,
             save_webui_arguments,
+            get_webui_settings,
+            save_webui_settings,
             gallery::list_gallery_images,
             set_page,
             installer::install_web_ui,
@@ -218,6 +249,8 @@ pub fn run() {
             installer::launch_web_ui,
             installer::stop_web_ui,
             installer::open_web_ui,
+            installer::check_xformers,
+            installer::install_xformers,
             civitai::search_models,
             civitai::download_model,
             civitai::pause_download,

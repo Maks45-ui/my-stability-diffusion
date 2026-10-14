@@ -49,7 +49,7 @@ export interface ModelSummary {
 }
 
 export interface TaskEvent {
-  kind: "install" | "launch" | "download";
+  kind: "install" | "launch" | "download" | "xformers";
   phase: TaskPhase;
   message: string;
   url?: string;
@@ -58,6 +58,11 @@ export interface TaskEvent {
   taskId?: string;
   bytesDownloaded?: number;
   totalBytes?: number;
+}
+
+export interface WebUISettings {
+  arguments: string[];
+  sdxlMemoryProfile: boolean;
 }
 
 export interface FlowAPI {
@@ -71,6 +76,10 @@ export interface FlowAPI {
   openWebUI(): Promise<void>;
   getWebUIArguments(): Promise<string[]>;
   saveWebUIArguments(argumentsList: string[]): Promise<string[]>;
+  getWebUISettings(): Promise<WebUISettings>;
+  saveWebUISettings(settings: WebUISettings): Promise<WebUISettings>;
+  checkXformers(): Promise<string>;
+  installXformers(): Promise<void>;
   listGalleryImages(): Promise<GalleryImage[]>;
   searchModels(query: string): Promise<ModelSummary[]>;
   downloadModel(file: ModelFile, type: string, taskId: string, resume: boolean): Promise<void>;

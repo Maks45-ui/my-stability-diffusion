@@ -293,7 +293,7 @@ fn tail_webui_log(app: AppHandle, mut reader: fs::File, control: WebuiControl) -
     })
 }
 
-fn run_logged(app: &AppHandle, control: &InstallControl, program: &str, args: &[String], cwd: &Path, locked_file: Option<Arc<AtomicBool>>) -> Result<(), String> {
+fn run_logged_kind(app: &AppHandle, control: &InstallControl, kind: &'static str, program: &str, args: &[String], cwd: &Path, locked_file: Option<Arc<AtomicBool>>) -> Result<(), String> {
     if control.cancelled.load(Ordering::SeqCst) { return Err("Установка отменена.".to_owned()); }
     let mut command = Command::new(program);
     command.args(args).current_dir(cwd)
@@ -306,8 +306,8 @@ fn run_logged(app: &AppHandle, control: &InstallControl, program: &str, args: &[
     hide_console(&mut command);
     let mut child = command.spawn().map_err(|error| format!("Не удалось запустить {program}: {error}"))?;
     if let Ok(mut pid) = control.pid.lock() { *pid = Some(child.id()); }
-    let stdout = child.stdout.take().map(|pipe| pipe_logs(app.clone(), "install", "log", pipe, locked_file.clone(), None));
-    let stderr = child.stderr.take().map(|pipe| pipe_logs(app.clone(), "install", "log", pipe, locked_file, None));
+    let stdout = child.stdout.take().map(|pipe| pipe_logs(app.clone(), kind, "log", pipe, locked_file.clone(), None));
+    let stderr = child.stderr.take().map(|pipe| pipe_logs(app.clone(), kind, "log", pipe, locked_file, None));
     let status = loop {
         if control.cancelled.load(Ordering::SeqCst) {
             let _ = child.kill();
@@ -322,6 +322,33 @@ fn run_logged(app: &AppHandle, control: &InstallControl, program: &str, args: &[
     if control.cancelled.load(Ordering::SeqCst) { return Err("Установка отменена.".to_owned()); }
     if !status.success() { return Err(format!("Команда завершилась с кодом {:?}.", status.code())); }
     Ok(())
+}
+
+fn run_logged(app: &AppHandle, control: &InstallControl, program: &str, args: &[String], cwd: &Path, locked_file: Option<Arc<AtomicBool>>) -> Result<(), String> {
+    run_logged_kind(app, control, "install", program, args, cwd, locked_file)
+}
+
+const SDXL_ALLOC_CONF: &str = "backend:native,garbage_collection_threshold:0.6,max_split_size_mb:128";
+
+fn update_sdxl_memory_config(config: &mut serde_json::Value) -> Result<(), String> {
+    let options = config.as_object_mut().ok_or("config.json WebUI должен содержать объект JSON.")?;
+    // A1111 keeps extra checkpoints in RAM/VRAM when this limit is higher than one.
+    options.insert("sd_checkpoints_limit".to_owned(), json!(1));
+    options.insert("sd_checkpoints_keep_in_cpu".to_owned(), json!(true));
+    options.insert("sd_checkpoint_cache".to_owned(), json!(0));
+    options.insert("sd_vae_checkpoint_cache".to_owned(), json!(0));
+    Ok(())
+}
+
+fn apply_sdxl_memory_settings(directory: &Path) -> Result<(), String> {
+    let path = directory.join("config.json");
+    let mut config = if path.is_file() {
+        serde_json::from_slice::<serde_json::Value>(&fs::read(&path).map_err(|error| error.to_string())?)
+            .map_err(|error| format!("Некорректный config.json WebUI: {error}"))?
+    } else { json!({}) };
+    update_sdxl_memory_config(&mut config)?;
+    fs::write(&path, serde_json::to_vec_pretty(&config).map_err(|error| error.to_string())?)
+        .map_err(|error| format!("Не удалось сохранить настройки памяти WebUI: {error}"))
 }
 
 fn run_logged_retry_locked(app: &AppHandle, control: &InstallControl, program: &str, args: &[String], cwd: &Path) -> Result<(), String> {
@@ -476,7 +503,8 @@ fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(
 }
 
 #[tauri::command]
-pub(crate) async fn install_web_ui(app: AppHandle, state: State<'_, Arc<InstallControl>>, installation_dir: String) -> Result<(), String> {
+pub(crate) async fn install_web_ui(app: AppHandle, state: State<'_, Arc<InstallControl>>, webui: State<'_, WebuiControl>, installation_dir: String) -> Result<(), String> {
+    if webui.is_running() { return Err("Остановите WebUI перед установкой пакета.".to_owned()); }
     let selected = crate::paths::subprocess_path(&PathBuf::from(installation_dir.trim()));
     if !selected.is_absolute() || !selected.is_dir() { return Err("Выберите существующую папку установки.".to_owned()); }
     // Reject stale UI state: the path passed to Rust must be the saved selection.
@@ -518,14 +546,81 @@ pub(crate) fn cancel_install(app: AppHandle, state: State<'_, Arc<InstallControl
     }
 }
 
+fn installed_webui_python(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
+    let directory = installation_dir(app)?.join("sd-webui");
+    if !directory.join(".flow-installed.json").is_file() {
+        return Err("Сначала установите WebUI.".to_owned());
+    }
+    if !directory.join("launch.py").is_file() { return Err("Файл запуска WebUI не найден.".to_owned()); }
+    let python = if cfg!(windows) { directory.join("venv/Scripts/python.exe") } else { directory.join("venv/bin/python") };
+    if !python.is_file() { return Err("Виртуальное окружение WebUI не найдено.".to_owned()); }
+    Ok((directory, python))
+}
+
+fn xformers_version(directory: &Path, python: &Path) -> Result<String, String> {
+    let mut command = Command::new(python);
+    command.args(["-c", "import xformers, xformers.ops; print(xformers.__version__)"])
+        .current_dir(directory).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    hide_console(&mut command);
+    let output = command.output().map_err(|error| format!("Не удалось проверить xformers: {error}"))?;
+    if !output.status.success() {
+        return Err("xformers не установлен или не загружается в окружении WebUI.".to_owned());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
 #[tauri::command]
-pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) -> Result<(), String> {
+pub(crate) async fn check_xformers(app: AppHandle) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (directory, python) = installed_webui_python(&app)?;
+        xformers_version(&directory, &python)
+    }).await.map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub(crate) async fn install_xformers(
+    app: AppHandle,
+    state: State<'_, Arc<InstallControl>>,
+    webui: State<'_, WebuiControl>,
+) -> Result<(), String> {
+    if webui.is_running() { return Err("Остановите WebUI перед установкой xformers.".to_owned()); }
+    let (directory, python) = installed_webui_python(&app)?;
+    if state.running.swap(true, Ordering::SeqCst) { return Err("Уже выполняется установка.".to_owned()); }
+    state.cancelled.store(false, Ordering::SeqCst);
+    let control = Arc::clone(&*state);
+    tauri::async_runtime::spawn_blocking(move || {
+        notify_kind(&app, "xformers", "dependencies", "Проверка xformers в окружении WebUI…");
+        let result = if xformers_version(&directory, &python).is_ok() {
+            Ok(())
+        } else {
+            notify_kind(&app, "xformers", "dependencies", "WebUI устанавливает совместимую версию xformers…");
+            // Let the WebUI launcher choose its pinned wheel and use --no-deps.
+            run_logged_kind(&app, &control, "xformers", &python.to_string_lossy(),
+                &["-u".to_owned(), "launch.py".to_owned(), "--exit".to_owned(), "--xformers".to_owned(), "--reinstall-xformers".to_owned(), "--skip-torch-cuda-test".to_owned()],
+                &directory, None)
+                .and_then(|_| xformers_version(&directory, &python).map(|_| ()))
+        };
+        match result {
+            Ok(()) => notify_kind(&app, "xformers", "done", "xformers доступен в окружении WebUI. Для использования включите --xformers и перезапустите WebUI."),
+            Err(error) => notify_kind(&app, "xformers", if control.cancelled.load(Ordering::SeqCst) { "cancelled" } else { "error" }, error),
+        }
+        control.running.store(false, Ordering::SeqCst);
+    });
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, installs: State<'_, Arc<InstallControl>>) -> Result<(), String> {
+    if webui.is_running() { return Err("WebUI уже запущен или запускается.".to_owned()); }
+    if installs.is_running() { return Err("Дождитесь завершения установки пакета или xformers.".to_owned()); }
     let directory = installation_dir(&app)?.join("sd-webui");
     if !directory.join(".flow-installed.json").is_file() { return Err("Сначала установите пакет.".to_owned()); }
     if !directory.join("launch.py").is_file() { return Err("Файл запуска WebUI не найден.".to_owned()); }
     let python = if cfg!(windows) { directory.join("venv/Scripts/python.exe") } else { directory.join("venv/bin/python") };
     if !python.is_file() { return Err("Виртуальное окружение WebUI не найдено.".to_owned()); }
     let arguments = parse_webui_arguments(&crate::webui_arguments(&app)?)?;
+    let memory_profile = crate::sdxl_memory_profile(&app)?;
+    if memory_profile { apply_sdxl_memory_settings(&directory)?; }
     // webui-user.bat clears COMMANDLINE_ARGS and does not forward its own arguments.
     // Passing args directly to launch.py also avoids shell quoting and a visible CMD window.
     let mut command = Command::new(python);
@@ -538,6 +633,11 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) -> R
         // The saved flags are passed as argv; inherited COMMANDLINE_ARGS must not repeat them.
         .env_remove("COMMANDLINE_ARGS")
         .stdin(Stdio::null());
+    if memory_profile {
+        // Configure only this Python process, before torch is imported.
+        command.env("PYTORCH_CUDA_ALLOC_CONF", SDXL_ALLOC_CONF);
+        command.env("PYTORCH_ALLOC_CONF", SDXL_ALLOC_CONF);
+    }
     hide_console(&mut command);
     if webui.running.swap(true, Ordering::SeqCst) { return Err("WebUI уже запущен или запускается.".to_owned()); }
     webui.stopping.store(false, Ordering::SeqCst);
@@ -670,7 +770,7 @@ pub(crate) fn open_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) -> Res
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_webui_arguments, parse_webui_ready_url};
+    use super::{parse_webui_arguments, parse_webui_ready_url, update_sdxl_memory_config};
 
     #[test]
     fn webui_ready_url_uses_reported_port() {
@@ -684,5 +784,15 @@ mod tests {
     fn webui_arguments_reject_duplicate_flags() {
         assert!(parse_webui_arguments(&["--lowvram".to_owned(), "--lowvram".to_owned()]).is_err());
         assert_eq!(parse_webui_arguments(&["--medvram".to_owned(), "--xformers".to_owned()]).unwrap(), vec!["--medvram", "--xformers"]);
+    }
+
+    #[test]
+    fn sdxl_profile_keeps_unrelated_webui_options() {
+        let mut config = serde_json::json!({ "samples_format": "png", "sd_checkpoints_limit": 3 });
+        update_sdxl_memory_config(&mut config).unwrap();
+        assert_eq!(config["samples_format"], "png");
+        assert_eq!(config["sd_checkpoints_limit"], 1);
+        assert_eq!(config["sd_checkpoint_cache"], 0);
+        assert_eq!(config["sd_vae_checkpoint_cache"], 0);
     }
 }

@@ -335,6 +335,15 @@ h1, h2, h3, p { margin: 0; }
 .webui-quick-arg { min-height: 27px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--muted); font: 11px Consolas, monospace; transition: border-color .18s, color .18s, background-color .18s, transform .18s; }
 .webui-quick-arg:hover { border-color: var(--accent); color: var(--text); transform: translateY(-1px); }
 .webui-quick-arg[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.webui-memory-card.glass-surface { display: grid; gap: 16px; margin-top: 14px; padding: 18px 20px; border-radius: 18px; background: color-mix(in srgb, var(--glass-bg) 90%, var(--accent-soft)); }
+.webui-memory-card h3 { font-size: 14px; }
+.webui-memory-card p { margin: 7px 0 12px; }
+.webui-memory-toggle { display: flex; align-items: flex-start; gap: 11px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); color: var(--text); font-size: 12px; line-height: 1.45; cursor: pointer; }
+.webui-memory-toggle input { width: 17px; height: 17px; flex: 0 0 auto; margin: 1px 0 0; accent-color: var(--accent); }
+.webui-xformers { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.webui-xformers > div { display: grid; gap: 4px; flex: 1 1 180px; }
+.webui-xformers strong { font-size: 12px; }
+.webui-xformers span { color: var(--muted); font-size: 11px; }
 .webui-settings-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 18px; }
 .webui-settings-footer .modal-actions { margin-top: 0; }
 .webui-settings-state { color: var(--muted); font-size: 11px; line-height: 1.4; }
