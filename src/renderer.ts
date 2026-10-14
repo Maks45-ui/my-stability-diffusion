@@ -490,6 +490,7 @@ function onTask(event: TaskEvent): void {
   }
   if (event.kind === "launch") {
     if (event.phase === "starting") setConsoleStatus("Запуск WebUI", "running");
+    if (event.phase === "stabilizing") setConsoleStatus("Подготовка WebUI", "running");
     if (event.phase === "ready" && event.url) {
       setConsoleStatus("WebUI запущен", "running");
       void refreshState();

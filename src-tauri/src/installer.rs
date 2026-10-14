@@ -6,9 +6,9 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     collections::HashSet,
-    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex},
+    sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc, Mutex},
     thread,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
@@ -27,23 +27,22 @@ impl Drop for WindowsJob {
 }
 
 #[cfg(windows)]
+impl WindowsJob {
+    fn terminate(&self) -> Result<(), String> {
+        let result = unsafe { windows_sys::Win32::System::JobObjects::TerminateJobObject(self.0, 1) };
+        if result == 0 { Err(format!("Не удалось завершить группу WebUI: {}", std::io::Error::last_os_error())) }
+        else { Ok(()) }
+    }
+}
+
+#[cfg(windows)]
 fn webui_job(child: &std::process::Child) -> Result<WindowsJob, String> {
-    use std::{mem::size_of, os::windows::io::AsRawHandle};
-    use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    };
-    // Closing this handle also terminates descendants left behind by a crashed launcher.
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW};
+    // The job groups WebUI's descendants for an explicit Stop. Closing Flow must not kill Python.
     let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
     if handle.is_null() { return Err(format!("Не удалось создать группу WebUI: {}", std::io::Error::last_os_error())); }
     let job = WindowsJob(handle);
-    let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-    let configured = unsafe {
-        SetInformationJobObject(handle, JobObjectExtendedLimitInformation,
-            &limits as *const _ as *const std::ffi::c_void, size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32)
-    };
-    if configured == 0 { return Err(format!("Не удалось настроить группу WebUI: {}", std::io::Error::last_os_error())); }
     let assigned = unsafe { AssignProcessToJobObject(handle, child.as_raw_handle() as _) };
     if assigned == 0 { return Err(format!("Не удалось добавить WebUI в группу процессов: {}", std::io::Error::last_os_error())); }
     Ok(job)
@@ -77,6 +76,8 @@ pub(crate) struct WebuiControl {
     exited: Arc<AtomicBool>,
     pid: Arc<Mutex<Option<u32>>>,
     ready_url: Arc<Mutex<Option<String>>>,
+    ready_pending: Arc<AtomicBool>,
+    generation: Arc<AtomicU64>,
     #[cfg(windows)]
     job: Arc<Mutex<Option<WindowsJob>>>,
 }
@@ -95,9 +96,12 @@ impl WebuiControl {
     }
 
     pub(crate) fn ready_url(&self) -> Option<String> {
+        if self.exited.load(Ordering::SeqCst) || self.stopping.load(Ordering::SeqCst) { return None; }
         self.ready_url.lock().unwrap_or_else(|poison| poison.into_inner()).clone()
     }
 }
+
+const WEBUI_OPEN_DELAY: Duration = Duration::from_millis(1500);
 
 fn notify_kind(app: &AppHandle, kind: &'static str, phase: &'static str, message: impl Into<String>) {
     emit_task(app, TaskEvent {
@@ -205,16 +209,27 @@ fn emit_pipe_line(app: &AppHandle, kind: &'static str, phase: &'static str, line
     notify_kind(app, kind, phase, message);
     if let Some(webui) = webui {
         if let Some(url) = parse_webui_ready_url(&String::from_utf8_lossy(line)) {
-            let mut ready = webui.ready_url.lock().unwrap_or_else(|poison| poison.into_inner());
-            if ready.is_none() && webui.is_running() && !webui.is_stopping() && !webui.exited.load(Ordering::SeqCst) {
+            if !webui.is_running() || webui.is_stopping() || webui.exited.load(Ordering::SeqCst)
+                || webui.ready_pending.swap(true, Ordering::SeqCst) { return; }
+            notify_kind(app, "launch", "stabilizing", "Локальный адрес получен; проверка стабильности запуска 1,5 с…");
+            let app = app.clone();
+            let control = webui.clone();
+            let generation = control.generation.load(Ordering::SeqCst);
+            thread::spawn(move || {
+                thread::sleep(WEBUI_OPEN_DELAY);
+                if !control.is_running() || control.is_stopping() || control.exited.load(Ordering::SeqCst)
+                    || control.generation.load(Ordering::SeqCst) != generation { return; }
+                let mut ready = control.ready_url.lock().unwrap_or_else(|poison| poison.into_inner());
+                if control.exited.load(Ordering::SeqCst) || control.generation.load(Ordering::SeqCst) != generation { return; }
                 *ready = Some(url.clone());
                 drop(ready);
-                emit_task(app, TaskEvent {
+                if control.exited.load(Ordering::SeqCst) { return; }
+                emit_task(&app, TaskEvent {
                     kind: "launch", phase: "ready", message: format!("WebUI доступен: {url}"), url: Some(url),
                     percent: None, bytes_per_second: None, task_id: None,
                     bytes_downloaded: None, total_bytes: None,
                 });
-            }
+            });
         }
     }
 }
@@ -241,6 +256,40 @@ fn pipe_logs(app: AppHandle, kind: &'static str, phase: &'static str, mut reader
             }
         }
         if !line.is_empty() { emit_pipe_line(&app, kind, phase, &line, locked_file.as_deref(), webui.as_ref()); }
+    })
+}
+
+fn tail_webui_log(app: AppHandle, mut reader: fs::File, control: WebuiControl) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let mut buffer = [0_u8; 4096];
+        let mut line = Vec::new();
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) if control.exited.load(Ordering::SeqCst) => break,
+                Ok(0) => thread::sleep(Duration::from_millis(50)),
+                Ok(count) => {
+                    for &byte in &buffer[..count] {
+                        if byte == b'\n' || byte == b'\r' {
+                            if !line.is_empty() {
+                                emit_pipe_line(&app, "launch", "log", &line, None, Some(&control));
+                                line.clear();
+                            }
+                        } else {
+                            line.push(byte);
+                            if line.len() >= 16_384 {
+                                emit_pipe_line(&app, "launch", "log", &line, None, Some(&control));
+                                line.clear();
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    notify_kind(&app, "launch", "log", format!("Ошибка чтения журнала WebUI: {error}"));
+                    break;
+                }
+            }
+        }
+        if !line.is_empty() { emit_pipe_line(&app, "launch", "log", &line, None, Some(&control)); }
     })
 }
 
@@ -488,13 +537,35 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) -> R
         .env("STABLE_DIFFUSION_REPO", SD_REPO)
         // The saved flags are passed as argv; inherited COMMANDLINE_ARGS must not repeat them.
         .env_remove("COMMANDLINE_ARGS")
-        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        .stdin(Stdio::null());
     hide_console(&mut command);
     if webui.running.swap(true, Ordering::SeqCst) { return Err("WebUI уже запущен или запускается.".to_owned()); }
     webui.stopping.store(false, Ordering::SeqCst);
     webui.stopped.store(false, Ordering::SeqCst);
     webui.exited.store(false, Ordering::SeqCst);
+    webui.ready_pending.store(false, Ordering::SeqCst);
+    webui.generation.fetch_add(1, Ordering::SeqCst);
     *webui.ready_url.lock().unwrap_or_else(|poison| poison.into_inner()) = None;
+    // Python writes to a real file. A WebView2/Flow crash cannot close its stdout pipe.
+    let log_setup = (|| -> Result<(fs::File, fs::File, PathBuf), String> {
+        let log_dir = crate::data_dir(&app)?.join("logs");
+        fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+        let log_path = log_dir.join(format!("webui-{}-{stamp}.log", std::process::id()));
+        let writer = fs::OpenOptions::new().append(true).create_new(true).open(&log_path)
+            .map_err(|error| format!("Не удалось создать журнал WebUI: {error}"))?;
+        let reader = fs::File::open(&log_path).map_err(|error| format!("Не удалось открыть журнал WebUI: {error}"))?;
+        Ok((writer, reader, log_path))
+    })();
+    let (writer, reader, log_path) = match log_setup {
+        Ok(files) => files,
+        Err(error) => { webui.running.store(false, Ordering::SeqCst); return Err(error); }
+    };
+    let stdout = match writer.try_clone() {
+        Ok(file) => file,
+        Err(error) => { webui.running.store(false, Ordering::SeqCst); return Err(format!("Не удалось открыть вывод WebUI: {error}")); }
+    };
+    command.stdout(Stdio::from(stdout)).stderr(Stdio::from(writer));
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
@@ -516,25 +587,28 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) -> R
     }
     *webui.pid.lock().unwrap_or_else(|poison| poison.into_inner()) = Some(child.id());
     notify_kind(&app, "launch", "starting", "WebUI запускается…");
+    notify_kind(&app, "launch", "log", format!("Журнал WebUI: {}", log_path.display()));
     let control = (*webui).clone();
     thread::spawn(move || {
-        let stdout = child.stdout.take().map(|pipe| pipe_logs(app.clone(), "launch", "log", pipe, None, Some(control.clone())));
-        let stderr = child.stderr.take().map(|pipe| pipe_logs(app.clone(), "launch", "log", pipe, None, Some(control.clone())));
+        let logger = tail_webui_log(app.clone(), reader, control.clone());
         let result = child.wait();
         control.exited.store(true, Ordering::SeqCst);
         let was_stopping = control.stopping.swap(false, Ordering::SeqCst);
-        // Close the job before joining pipe readers: an orphaned descendant can keep a pipe open.
-        #[cfg(windows)] { control.job.lock().unwrap_or_else(|poison| poison.into_inner()).take(); }
-        if let Some(handle) = stdout { let _ = handle.join(); }
-        if let Some(handle) = stderr { let _ = handle.join(); }
-        let was_ready = control.ready_url();
+        // Terminate remaining descendants before the log tailer drains the final output.
+        #[cfg(windows)] {
+            if let Some(job) = control.job.lock().unwrap_or_else(|poison| poison.into_inner()).take() {
+                let _ = job.terminate();
+            }
+        }
+        let _ = logger.join();
+        let was_ready = control.ready_url.lock().unwrap_or_else(|poison| poison.into_inner()).is_some();
         *control.pid.lock().unwrap_or_else(|poison| poison.into_inner()) = None;
         *control.ready_url.lock().unwrap_or_else(|poison| poison.into_inner()) = None;
         control.stopped.store(true, Ordering::SeqCst);
         control.running.store(false, Ordering::SeqCst);
         match result {
             Ok(_) if was_stopping => notify_kind(&app, "launch", "done", "WebUI остановлен пользователем."),
-            Ok(status) if status.success() && was_ready.is_some() => notify_kind(&app, "launch", "done", "WebUI остановлен."),
+            Ok(status) if status.success() && was_ready => notify_kind(&app, "launch", "done", "WebUI остановлен."),
             Ok(status) if status.success() => notify_kind(&app, "launch", "error", "WebUI завершился до появления локального адреса."),
             Ok(status) if status.code() == Some(-1073741819) => notify_kind(&app, "launch", "error", "WebUI аварийно завершился: 0xC0000005 (нарушение доступа). Проверьте последние строки лога WebUI и журнал событий Windows."),
             Ok(status) => notify_kind(&app, "launch", "error", format!("WebUI завершился с кодом {:?}.", status.code())),
@@ -572,13 +646,14 @@ pub(crate) async fn stop_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) 
         };
         let output = command.output();
         #[cfg(windows)]
-        let managed = control.job.lock().unwrap_or_else(|poison| poison.into_inner()).take().is_some();
+        let managed = control.job.lock().unwrap_or_else(|poison| poison.into_inner()).take()
+            .is_some_and(|job| job.terminate().is_ok());
         #[cfg(not(windows))]
         let managed = false;
         let result = match output {
-            Ok(output) if output.status.success() || managed || !control.is_running() => Ok(()),
+            Ok(output) if output.status.success() || managed || control.exited.load(Ordering::SeqCst) || !control.is_running() => Ok(()),
             Ok(output) => Err(format!("Не удалось остановить WebUI: {}", String::from_utf8_lossy(&output.stderr).trim())),
-            Err(_) if managed || !control.is_running() => Ok(()),
+            Err(_) if managed || control.exited.load(Ordering::SeqCst) || !control.is_running() => Ok(()),
             Err(error) => Err(format!("Не удалось остановить WebUI: {error}")),
         };
         if result.is_err() { control.stopping.store(false, Ordering::SeqCst); }
@@ -588,7 +663,7 @@ pub(crate) async fn stop_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) 
 
 #[tauri::command]
 pub(crate) fn open_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) -> Result<(), String> {
-    if !webui.is_running() || webui.is_stopping() { return Err("WebUI сейчас недоступен.".to_owned()); }
+    if !webui.is_running() || webui.is_stopping() || webui.exited.load(Ordering::SeqCst) { return Err("WebUI сейчас недоступен.".to_owned()); }
     let url = webui.ready_url().ok_or("WebUI ещё запускается.")?;
     app.opener().open_url(url, None::<&str>).map_err(|error| error.to_string())
 }

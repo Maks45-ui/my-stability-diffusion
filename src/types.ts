@@ -1,5 +1,5 @@
 export type Page = "home" | "gallery" | "models" | "settings";
-export type TaskPhase = "idle" | "checking" | "cloning" | "venv" | "dependencies" | "starting" | "ready" | "running" | "stopping" | "log" | "paused" | "done" | "error" | "cancelled";
+export type TaskPhase = "idle" | "checking" | "cloning" | "venv" | "dependencies" | "starting" | "stabilizing" | "ready" | "running" | "stopping" | "log" | "paused" | "done" | "error" | "cancelled";
 
 export interface PackageInfo {
   name: string;

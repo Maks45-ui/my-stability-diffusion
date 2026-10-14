@@ -197,6 +197,8 @@ fn set_page(page: String) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(windows)]
+    configure_webview2();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -226,4 +228,17 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Flow");
+}
+
+#[cfg(windows)]
+fn configure_webview2() {
+    // Diagnostic fallback only. WebUI itself opens in the system browser, outside this WebView2.
+    let requested = std::env::var("FLOW_WEBVIEW2_SOFTWARE_RENDERING").as_deref() == Ok("1")
+        || std::env::args_os().any(|argument| argument.to_string_lossy() == "--flow-software-rendering");
+    if !requested { return; }
+    let current = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default();
+    if current.split_whitespace().any(|argument| argument == "--disable-gpu") { return; }
+    let flags = if current.trim().is_empty() { "--disable-gpu".to_owned() }
+        else { format!("{} --disable-gpu", current.trim()) };
+    std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", flags);
 }
