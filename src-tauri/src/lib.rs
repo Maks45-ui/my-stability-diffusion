@@ -7,6 +7,7 @@ mod paths;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, sync::Arc};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 #[derive(Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,6 +20,8 @@ struct Settings {
     webui_arguments: Vec<String>,
     #[serde(default)]
     sdxl_memory_profile: bool,
+    #[serde(default)]
+    onboarding_complete: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -117,11 +120,9 @@ pub(crate) fn sdxl_memory_profile(app: &AppHandle) -> Result<bool, String> {
 }
 
 pub(crate) fn civitai_token(app: &AppHandle) -> Result<String, String> {
-    let env = std::env::var("CIVITAI_API_KEY").unwrap_or_default();
-    if !env.trim().is_empty() {
-        return Ok(env);
-    }
-    Ok(read_settings(app)?.civitai_token)
+    let saved = read_settings(app)?.civitai_token;
+    if !saved.is_empty() { return Ok(saved); }
+    Ok(std::env::var("CIVITAI_API_KEY").unwrap_or_default())
 }
 
 #[tauri::command]
@@ -189,6 +190,42 @@ fn save_civitai_token(app: AppHandle, token: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_onboarding_complete(app: AppHandle) -> Result<bool, String> {
+    let mut settings = read_settings(&app)?;
+    // Existing installations with a saved key have already configured Civitai.
+    if !settings.onboarding_complete && !settings.civitai_token.is_empty() {
+        settings.onboarding_complete = true;
+        write_settings(&app, &settings)?;
+    }
+    Ok(settings.onboarding_complete)
+}
+
+#[tauri::command]
+fn complete_onboarding(app: AppHandle, token: Option<String>) -> Result<(), String> {
+    let mut settings = read_settings(&app)?;
+    apply_onboarding_choice(&mut settings, token)?;
+    // The key and completion flag are persisted together; the UI closes only on success.
+    write_settings(&app, &settings)
+}
+
+fn apply_onboarding_choice(settings: &mut Settings, token: Option<String>) -> Result<(), String> {
+    if let Some(token) = token {
+        let token = token.trim();
+        if token.is_empty() || token.len() > 512 || token.chars().any(char::is_whitespace) {
+            return Err("Введите корректный API-ключ без пробелов.".to_owned());
+        }
+        settings.civitai_token = token.to_owned();
+    }
+    settings.onboarding_complete = true;
+    Ok(())
+}
+
+#[tauri::command]
+fn open_civitai_site(app: AppHandle) -> Result<(), String> {
+    app.opener().open_url("https://civitai.red/", None::<&str>).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn get_webui_arguments(app: AppHandle) -> Result<Vec<String>, String> {
     webui_arguments(&app)
 }
@@ -238,6 +275,9 @@ pub fn run() {
             get_state,
             set_installation_dir,
             save_civitai_token,
+            get_onboarding_complete,
+            complete_onboarding,
+            open_civitai_site,
             get_webui_arguments,
             save_webui_arguments,
             get_webui_settings,
@@ -274,4 +314,29 @@ fn configure_webview2() {
     let flags = if current.trim().is_empty() { "--disable-gpu".to_owned() }
         else { format!("{} --disable-gpu", current.trim()) };
     std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", flags);
+}
+
+#[cfg(test)]
+mod onboarding_tests {
+    use super::{apply_onboarding_choice, Settings};
+
+    #[test]
+    fn skip_and_save_complete_onboarding() {
+        let mut skipped = Settings::default();
+        apply_onboarding_choice(&mut skipped, None).unwrap();
+        assert!(skipped.onboarding_complete);
+        assert!(skipped.civitai_token.is_empty());
+
+        let mut saved = Settings::default();
+        apply_onboarding_choice(&mut saved, Some("  sample-key  ".to_owned())).unwrap();
+        assert!(saved.onboarding_complete);
+        assert_eq!(saved.civitai_token, "sample-key");
+    }
+
+    #[test]
+    fn invalid_key_does_not_complete_onboarding() {
+        let mut settings = Settings::default();
+        assert!(apply_onboarding_choice(&mut settings, Some("  ".to_owned())).is_err());
+        assert!(!settings.onboarding_complete);
+    }
 }

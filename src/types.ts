@@ -89,6 +89,9 @@ export interface FlowAPI {
   deleteDownload(modelType: string, fileName: string): Promise<void>;
   getPreview(url: string): Promise<string>;
   saveCivitaiToken(token: string): Promise<void>;
+  getOnboardingComplete(): Promise<boolean>;
+  completeOnboarding(token: string | null): Promise<void>;
+  openCivitaiSite(): Promise<void>;
   setPage(page: Page): Promise<void>;
   onTask(callback: (event: TaskEvent) => void): Promise<() => void>;
 }

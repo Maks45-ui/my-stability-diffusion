@@ -1,7 +1,7 @@
 import { flowApi } from "./bridge";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { DownloadManager } from "./download-manager";
-import { startSplashScreen } from "./splash";
+import { FirstRunController } from "./onboarding";
 import { ThemeController } from "./theme";
 import type { AppState, GalleryImage, ModelSummary, Page, TaskEvent } from "./types";
 
@@ -697,7 +697,8 @@ element<HTMLFormElement>("token-form").addEventListener("submit", async (event) 
 });
 window.addEventListener("resize", updateIndicator);
 void window.flow.onTask(onTask).catch((error: unknown) => notify(message(error)));
-startSplashScreen();
+const firstRun = new FirstRunController(flowApi, element<HTMLElement>("app-shell"), () => { void refreshState(); });
+void firstRun.start().catch((error: unknown) => notify(message(error)));
 void refreshState();
 void downloadManager.restore().catch((error: unknown) => notify(message(error)));
 void window.flow.setPage("home").catch(() => { /* Discord may be unavailable. */ });
