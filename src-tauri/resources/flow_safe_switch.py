@@ -20,7 +20,7 @@ if os.environ.get("FLOW_SAFE_MODEL_SWITCH") == "1":
             current = sd_model or sd_models.model_data.sd_model
             target = info or sd_models.select_checkpoint()
             if current is not None and current.sd_checkpoint_info.filename != target.filename:
-                print("[Flow] Выгружаю предыдущий чекпоинт до загрузки нового…", flush=True)
+                print("[Flow] Unloading previous checkpoint before loading the next one...", flush=True)
 
                 # Clear live references first: empty_cache alone cannot release
                 # tensors that are still owned by the old checkpoint.
@@ -38,11 +38,12 @@ if os.environ.get("FLOW_SAFE_MODEL_SWITCH") == "1":
                 sd_vae.loaded_vae_file = None
                 sd_vae.checkpoint_info = None
                 loaded.clear()
+                del model
                 del current
                 sd_model = None
                 gc.collect()
                 devices.torch_gc()  # CUDA: torch.cuda.empty_cache() + ipc_collect().
-                print("[Flow] Память CUDA очищена; загружаю новый чекпоинт.", flush=True)
+                print("[Flow] CUDA cache cleared; loading the next checkpoint.", flush=True)
 
             return original_reload(sd_model, info, forced_reload)
 
