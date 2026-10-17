@@ -10,7 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "Flow", "width": 1280, "height": 800, "minWidth": 920, "minHeight": 600, "backgroundColor": "#121820" }],
+    "windows": [{ "title": "Flow", "width": 1280, "height": 800, "minWidth": 920, "minHeight": 600, "backgroundColor": "#111317" }],
     "security": {
       "assetProtocol": { "enable": true, "scope": [] },
       "csp": "default-src 'self'; img-src 'self' data: asset: http://asset.localhost; script-src 'self'; style-src 'self'; connect-src ipc: http://ipc.localhost"
