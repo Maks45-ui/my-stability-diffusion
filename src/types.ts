@@ -31,6 +31,11 @@ export interface ModelFile {
   sizeKb: number;
 }
 
+export interface StarterModel {
+  previewUrl: string | null;
+  file: ModelFile;
+}
+
 export interface DownloadedFile {
   name: string;
   modelType: string;
@@ -82,6 +87,7 @@ export interface FlowAPI {
   installXformers(): Promise<void>;
   listGalleryImages(): Promise<GalleryImage[]>;
   searchModels(query: string): Promise<ModelSummary[]>;
+  getStarterModel(key: string): Promise<StarterModel>;
   downloadModel(file: ModelFile, type: string, taskId: string, resume: boolean): Promise<void>;
   pauseDownload(): Promise<void>;
   cancelDownload(): Promise<void>;
@@ -91,6 +97,9 @@ export interface FlowAPI {
   saveCivitaiToken(token: string): Promise<void>;
   getOnboardingComplete(): Promise<boolean>;
   completeOnboarding(token: string | null): Promise<void>;
+  getOnboardingStage(): Promise<number>;
+  saveOnboardingToken(token: string | null): Promise<void>;
+  finishOnboarding(): Promise<void>;
   openCivitaiSite(): Promise<void>;
   setPage(page: Page): Promise<void>;
   onTask(callback: (event: TaskEvent) => void): Promise<() => void>;

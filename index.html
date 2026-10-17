@@ -85,6 +85,7 @@
       <div><span class="eyebrow">ПЕРВЫЙ ЗАПУСК FLOW</span><h2 id="first-run-title">Перед тем как начать</h2></div>
     </div>
     <p id="first-run-intro">Подключите Civitai, чтобы искать и скачивать модели. Этот шаг можно выполнить позже в настройках.</p>
+    <div id="first-run-key-step">
     <ol class="first-run-steps">
       <li><span class="first-run-step-number">1</span><div><strong>Создайте аккаунт Civitai</strong><p>Перейдите на сайт и зарегистрируйтесь или войдите в свой аккаунт.</p><a href="https://civitai.red/" id="first-run-site" target="_blank" rel="noopener noreferrer">Открыть civitai.red ↗</a></div></li>
       <li><span class="first-run-step-number">2</span><div><strong>Создайте API-ключ</strong><p>Откройте настройки аккаунта → <b>Security &amp; Apps</b> → <b>Add API Key</b>. Скопируйте созданный ключ.</p></div></li>
@@ -96,6 +97,25 @@
       <div id="first-run-status" class="first-run-status" role="status" aria-live="polite"></div>
       <div class="first-run-actions"><button id="first-run-skip" class="secondary-button" type="button">Пропустить</button><button id="first-run-save" class="primary-button" type="submit">Сохранить ключ</button></div>
     </form>
+    </div>
+    <section id="first-run-model-step" class="first-run-model-step" hidden aria-labelledby="first-run-title">
+      <div class="first-run-model-grid" id="first-run-model-grid">
+        <article class="first-run-model-card" data-starter="indigo">
+          <div class="first-run-model-preview"><img alt="Пример изображения Indigo Furry mix" hidden /><span>◈</span></div>
+          <div class="first-run-model-body"><span class="eyebrow">STABLE DIFFUSION 1.x · CHECKPOINT</span><h3>Indigo Furry mix</h3><p>v120_hybrid</p><div class="first-run-model-progress" hidden><div class="first-run-model-track"><div></div></div><span class="first-run-model-percent">0%</span></div><p class="first-run-model-status" role="status">Загружаем сведения о модели…</p><button class="primary-button first-run-download" type="button" disabled>Скачать</button></div>
+        </article>
+        <article class="first-run-model-card" data-starter="wai">
+          <div class="first-run-model-preview"><img alt="Пример изображения WAI-illustrious-SDXL" hidden /><span>◈</span></div>
+          <div class="first-run-model-body"><span class="eyebrow">ILLUSTRIOUS · CHECKPOINT</span><h3>WAI-illustrious-SDXL</h3><p>v17.0</p><div class="first-run-model-progress" hidden><div class="first-run-model-track"><div></div></div><span class="first-run-model-percent">0%</span></div><p class="first-run-model-status" role="status">Загружаем сведения о модели…</p><button class="primary-button first-run-download" type="button" disabled>Скачать</button></div>
+        </article>
+        <article class="first-run-model-card" data-starter="realistic">
+          <div class="first-run-model-preview"><img alt="Пример изображения Realistic Vision V6.0 B1" hidden /><span>◈</span></div>
+          <div class="first-run-model-body"><span class="eyebrow">STABLE DIFFUSION 1.x · CHECKPOINT</span><h3>Realistic Vision V6.0 B1</h3><p>V5.1 Hyper (VAE)</p><div class="first-run-model-progress" hidden><div class="first-run-model-track"><div></div></div><span class="first-run-model-percent">0%</span></div><p class="first-run-model-status" role="status">Загружаем сведения о модели…</p><button class="primary-button first-run-download" type="button" disabled>Скачать</button></div>
+        </article>
+      </div>
+      <div id="first-run-model-error" class="first-run-status" role="status" aria-live="polite"></div>
+      <div class="first-run-actions"><button id="first-run-model-skip" class="secondary-button" type="button">Пропустить и начать работу</button></div>
+    </section>
   </dialog>
 
   <section class="glass-surface console-panel" id="console-panel" role="region" aria-labelledby="console-title" aria-hidden="true" inert>

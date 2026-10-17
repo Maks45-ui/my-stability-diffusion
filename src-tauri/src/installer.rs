@@ -454,6 +454,20 @@ fn install_local_clip(app: &AppHandle, control: &InstallControl, python: &Path, 
     Ok(())
 }
 
+fn only_preloaded_models(directory: &Path) -> Result<bool, String> {
+    let entries = fs::read_dir(directory).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    if entries.len() != 1 || entries[0].file_name().to_string_lossy() != "models" || !entries[0].file_type().map_err(|error| error.to_string())?.is_dir() { return Ok(false); }
+    let models = fs::read_dir(directory.join("models")).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    if models.len() != 1 || models[0].file_name().to_string_lossy() != "Stable-diffusion" || !models[0].file_type().map_err(|error| error.to_string())?.is_dir() { return Ok(false); }
+    for entry in fs::read_dir(directory.join("models/Stable-diffusion")).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        if !entry.file_type().map_err(|error| error.to_string())?.is_file()
+            || !(name.ends_with(".safetensors") || name.ends_with(".ckpt") || name.ends_with(".flow-part") || name.ends_with(".flow-meta.json")) { return Ok(false); }
+    }
+    Ok(true)
+}
+
 fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(), String> {
     notify(app, "checking", "Проверка Git и Python 3.10…");
     command_output(app, "git", &["--version".to_owned()]).map_err(|_| "Git не найден. Установите Git и перезапустите Flow.".to_owned())?;
@@ -461,12 +475,21 @@ fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(
     let directory = parent.join("sd-webui");
     notify(app, "cloning", format!("Папка пакета: {}", directory.display()));
     if directory.exists() {
-        if !directory.join(".git").is_dir() { return Err("Папка sd-webui занята другим содержимым.".to_owned()); }
+        if !directory.join(".git").is_dir() {
+            if !only_preloaded_models(&directory)? { return Err("Папка sd-webui занята другим содержимым.".to_owned()); }
+            notify(app, "cloning", "Модели уже загружены; добавляю файлы WebUI в эту папку.");
+            run_logged(app, control, "git", &["init".to_owned()], &directory, None)?;
+            run_logged(app, control, "git", &["remote".to_owned(), "add".to_owned(), "origin".to_owned(), WEBUI_REPO.to_owned()], &directory, None)?;
+        }
         let remote = command_output(app, "git", &["-C".to_owned(), directory.to_string_lossy().into_owned(), "remote".to_owned(), "get-url".to_owned(), "origin".to_owned()])?;
         if remote.trim_end_matches('/').trim_end_matches(".git").to_lowercase() != WEBUI_REPO.trim_end_matches(".git").to_lowercase() {
             return Err("В выбранной папке находится другой Git-репозиторий.".to_owned());
         }
         notify(app, "cloning", "Найден существующий репозиторий WebUI; продолжаю установку.");
+        if !directory.join("launch.py").is_file() {
+            run_logged(app, control, "git", &["fetch".to_owned(), "--depth".to_owned(), "1".to_owned(), "origin".to_owned(), "HEAD".to_owned()], &directory, None)?;
+            run_logged(app, control, "git", &["checkout".to_owned(), "--detach".to_owned(), "FETCH_HEAD".to_owned()], &directory, None)?;
+        }
     } else {
         run_logged(app, control, "git", &["clone".to_owned(), "--progress".to_owned(), WEBUI_REPO.to_owned(), directory.to_string_lossy().into_owned()], parent, None)?;
     }
@@ -503,8 +526,9 @@ fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(
 }
 
 #[tauri::command]
-pub(crate) async fn install_web_ui(app: AppHandle, state: State<'_, Arc<InstallControl>>, webui: State<'_, WebuiControl>, installation_dir: String) -> Result<(), String> {
+pub(crate) async fn install_web_ui(app: AppHandle, state: State<'_, Arc<InstallControl>>, webui: State<'_, WebuiControl>, downloads: State<'_, Arc<crate::civitai::DownloadControl>>, installation_dir: String) -> Result<(), String> {
     if webui.is_running() { return Err("Остановите WebUI перед установкой пакета.".to_owned()); }
+    if downloads.is_running() { return Err("Дождитесь завершения скачивания модели перед установкой WebUI.".to_owned()); }
     let selected = crate::paths::subprocess_path(&PathBuf::from(installation_dir.trim()));
     if !selected.is_absolute() || !selected.is_dir() { return Err("Выберите существующую папку установки.".to_owned()); }
     // Reject stale UI state: the path passed to Rust must be the saved selection.

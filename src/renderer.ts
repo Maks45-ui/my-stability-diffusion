@@ -530,6 +530,7 @@ function onTask(event: TaskEvent): void {
     return;
   }
   downloadManager.onTask(event);
+  firstRun.onTask(event);
 }
 
 document.querySelectorAll<HTMLButtonElement>(".nav-item").forEach((button) => {
@@ -697,7 +698,7 @@ element<HTMLFormElement>("token-form").addEventListener("submit", async (event) 
 });
 window.addEventListener("resize", updateIndicator);
 void window.flow.onTask(onTask).catch((error: unknown) => notify(message(error)));
-const firstRun = new FirstRunController(flowApi, element<HTMLElement>("app-shell"), () => { void refreshState(); });
+const firstRun = new FirstRunController(flowApi, element<HTMLElement>("app-shell"), (file, type, name) => downloadManager.enqueue(file, type, name), () => { void refreshState(); });
 void firstRun.start().catch((error: unknown) => notify(message(error)));
 void refreshState();
 void downloadManager.restore().catch((error: unknown) => notify(message(error)));

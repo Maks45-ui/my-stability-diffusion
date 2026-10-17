@@ -22,6 +22,8 @@ struct Settings {
     sdxl_memory_profile: bool,
     #[serde(default)]
     onboarding_complete: bool,
+    #[serde(default)]
+    onboarding_stage: u8,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -193,11 +195,45 @@ fn save_civitai_token(app: AppHandle, token: String) -> Result<(), String> {
 fn get_onboarding_complete(app: AppHandle) -> Result<bool, String> {
     let mut settings = read_settings(&app)?;
     // Existing installations with a saved key have already configured Civitai.
-    if !settings.onboarding_complete && !settings.civitai_token.is_empty() {
+    if !settings.onboarding_complete && settings.onboarding_stage == 0 && !settings.civitai_token.is_empty() {
         settings.onboarding_complete = true;
         write_settings(&app, &settings)?;
     }
     Ok(settings.onboarding_complete)
+}
+
+#[tauri::command]
+fn get_onboarding_stage(app: AppHandle) -> Result<u8, String> {
+    if get_onboarding_complete(app.clone())? { return Ok(2); }
+    Ok(read_settings(&app)?.onboarding_stage.min(1))
+}
+
+#[tauri::command]
+fn save_onboarding_token(app: AppHandle, token: Option<String>) -> Result<(), String> {
+    let mut settings = read_settings(&app)?;
+    apply_onboarding_token(&mut settings, token)?;
+    write_settings(&app, &settings)
+}
+
+fn apply_onboarding_token(settings: &mut Settings, token: Option<String>) -> Result<(), String> {
+    if let Some(token) = token {
+        let token = token.trim();
+        if token.is_empty() || token.len() > 512 || token.chars().any(char::is_whitespace) {
+            return Err("Введите корректный API-ключ без пробелов.".to_owned());
+        }
+        settings.civitai_token = token.to_owned();
+    }
+    settings.onboarding_stage = 1;
+    Ok(())
+}
+
+#[tauri::command]
+fn finish_onboarding(app: AppHandle) -> Result<(), String> {
+    let mut settings = read_settings(&app)?;
+    if settings.onboarding_stage != 1 { return Err("Сначала завершите шаг с API-ключом.".to_owned()); }
+    settings.onboarding_complete = true;
+    settings.onboarding_stage = 2;
+    write_settings(&app, &settings)
 }
 
 #[tauri::command]
@@ -209,14 +245,9 @@ fn complete_onboarding(app: AppHandle, token: Option<String>) -> Result<(), Stri
 }
 
 fn apply_onboarding_choice(settings: &mut Settings, token: Option<String>) -> Result<(), String> {
-    if let Some(token) = token {
-        let token = token.trim();
-        if token.is_empty() || token.len() > 512 || token.chars().any(char::is_whitespace) {
-            return Err("Введите корректный API-ключ без пробелов.".to_owned());
-        }
-        settings.civitai_token = token.to_owned();
-    }
+    apply_onboarding_token(settings, token)?;
     settings.onboarding_complete = true;
+    settings.onboarding_stage = 2;
     Ok(())
 }
 
@@ -276,6 +307,9 @@ pub fn run() {
             set_installation_dir,
             save_civitai_token,
             get_onboarding_complete,
+            get_onboarding_stage,
+            save_onboarding_token,
+            finish_onboarding,
             complete_onboarding,
             open_civitai_site,
             get_webui_arguments,
@@ -292,6 +326,7 @@ pub fn run() {
             installer::check_xformers,
             installer::install_xformers,
             civitai::search_models,
+            civitai::get_starter_model,
             civitai::download_model,
             civitai::pause_download,
             civitai::cancel_download,
@@ -318,7 +353,16 @@ fn configure_webview2() {
 
 #[cfg(test)]
 mod onboarding_tests {
-    use super::{apply_onboarding_choice, Settings};
+    use super::{apply_onboarding_choice, apply_onboarding_token, Settings};
+
+    #[test]
+    fn api_key_step_does_not_finish_onboarding() {
+        let mut settings = Settings::default();
+        apply_onboarding_token(&mut settings, Some(" sample-key ".to_owned())).unwrap();
+        assert_eq!(settings.onboarding_stage, 1);
+        assert!(!settings.onboarding_complete);
+        assert_eq!(settings.civitai_token, "sample-key");
+    }
 
     #[test]
     fn skip_and_save_complete_onboarding() {

@@ -58,6 +58,55 @@ pub(crate) struct ModelSummary {
     files: Vec<ModelFile>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct StarterModel {
+    preview_url: Option<String>,
+    file: ModelFile,
+}
+
+/// Resolve a pinned Civitai version, never the latest version of a model.
+#[tauri::command]
+pub(crate) async fn get_starter_model(app: AppHandle, key: String) -> Result<StarterModel, String> {
+    let (model_id, version_id) = match key.as_str() {
+        "indigo" => (34469, 397050),
+        "wai" => (827184, 2883731),
+        "realistic" => (4201, 501240),
+        _ => return Err("Неизвестная стартовая модель.".to_owned()),
+    };
+    let url = format!("https://civitai.red/api/v1/model-versions/{version_id}");
+    let mut request = client()?.get(url);
+    let token = civitai_token(&app)?;
+    if !token.is_empty() { request = request.bearer_auth(token); }
+    let response = request.send().await.map_err(|error| error.to_string())?.error_for_status().map_err(|error| error.to_string())?;
+    let version: Value = response.json().await.map_err(|error| error.to_string())?;
+    if version.get("id").and_then(Value::as_u64) != Some(version_id)
+        || version.get("modelId").and_then(Value::as_u64) != Some(model_id) {
+        return Err("Civitai вернул другую версию модели.".to_owned());
+    }
+    let files = version.get("files").and_then(Value::as_array).ok_or("У версии нет файлов.")?;
+    let selected = files.iter()
+        .filter(|file| file.get("name").and_then(Value::as_str).is_some_and(|name| name.to_ascii_lowercase().ends_with(".safetensors")))
+        .max_by_key(|file| {
+            let is_model = file.get("type").and_then(Value::as_str) == Some("Model");
+            let primary = file.get("primary").and_then(Value::as_bool) == Some(true);
+            (is_model, primary)
+        })
+        .ok_or("У выбранной версии нет файла SafeTensors.")?;
+    let name = safe_name(selected.get("name").and_then(Value::as_str).unwrap_or_default());
+    let download_url = selected.get("downloadUrl").and_then(Value::as_str).ok_or("Civitai не вернул ссылку на файл.")?.to_owned();
+    if name.is_empty() { return Err("Некорректное имя файла модели.".to_owned()); }
+    let url = allowed_url(&download_url)?;
+    if !url.path().starts_with("/api/download/models/") { return Err("Недопустимая ссылка на файл модели.".to_owned()); }
+    let preview_url = version.get("images").and_then(Value::as_array).and_then(|images| images.iter()
+        .filter(|image| image.get("type").and_then(Value::as_str) != Some("video"))
+        .filter_map(|image| image.get("url").and_then(Value::as_str))
+        .find(|url| allowed_url(url).is_ok()).map(str::to_owned));
+    Ok(StarterModel { preview_url, file: ModelFile {
+        name, download_url, size_kb: selected.get("sizeKB").and_then(Value::as_f64).unwrap_or(0.0),
+    } })
+}
+
 fn allowed_url(raw: &str) -> Result<Url, String> {
     let url = Url::parse(raw).map_err(|error| error.to_string())?;
     let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
@@ -172,9 +221,6 @@ fn download(app: &AppHandle, control: &DownloadControl, file: ModelFile, model_t
     let mut url = allowed_url(&file.download_url)?;
     if !url.path().starts_with("/api/download/models/") { return Err("Недопустимая ссылка скачивания.".to_owned()); }
     url.set_host(Some("civitai.red")).map_err(|_| "Недопустимый адрес скачивания.".to_owned())?;
-    if !installation_dir(app)?.join("sd-webui").join(".flow-installed.json").is_file() {
-        return Err("Сначала установите пакет WebUI, чтобы загружать модели в его папку.".to_owned());
-    }
     let (target, temp, meta) = paths(app, &file.name)?;
     if let Some(folder) = target.parent() { fs::create_dir_all(folder).map_err(|error| error.to_string())?; }
     if target.exists() { return Err("Файл уже загружен.".to_owned()); }

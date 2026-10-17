@@ -77,9 +77,9 @@ export class DownloadManager {
     this.updateCount();
   }
 
-  enqueue(file: ModelFile, modelType: string, modelName: string): void {
+  enqueue(file: ModelFile, modelType: string, modelName: string): string | null {
     const duplicate = [...this.items.values()].some((item) => item.file.name === file.name);
-    if (duplicate) { this.notify("Этот файл уже находится в списке загрузок."); return; }
+    if (duplicate) { this.notify("Этот файл уже находится в списке загрузок."); return null; }
     const item: DownloadItem = {
       id: crypto.randomUUID(), modelName, modelType, file, status: "queued",
       percent: 0, bytesDownloaded: 0, totalBytes: Math.max(0, file.sizeKb * 1024),
@@ -87,6 +87,7 @@ export class DownloadManager {
     };
     this.add(item);
     this.pump();
+    return item.id;
   }
 
   onTask(event: TaskEvent): void {
