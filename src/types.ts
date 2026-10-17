@@ -18,6 +18,15 @@ export interface AppState {
   installationDir: string;
 }
 
+export interface WebUIStatus {
+  running: boolean;
+  port: number | null;
+  pingMs: number | null;
+  vramUsedGb: number | null;
+  vramTotalGb: number | null;
+  activeModel: string | null;
+}
+
 export interface GalleryImage {
   path: string;
   fileName: string;
@@ -72,6 +81,7 @@ export interface WebUISettings {
 
 export interface FlowAPI {
   getState(): Promise<AppState>;
+  getWebUIStatus(): Promise<WebUIStatus>;
   installWebUI(installationDir: string): Promise<void>;
   browseInstallationDirectory(currentPath: string): Promise<string | null>;
   saveInstallationDirectory(directory: string): Promise<void>;

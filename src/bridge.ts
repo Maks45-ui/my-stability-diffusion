@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AppState, DownloadedFile, FlowAPI, GalleryImage, ModelFile, ModelSummary, Page, StarterModel, TaskEvent, WebUISettings } from "./types";
+import type { AppState, DownloadedFile, FlowAPI, GalleryImage, ModelFile, ModelSummary, Page, StarterModel, TaskEvent, WebUISettings, WebUIStatus } from "./types";
 
 // The UI only knows this typed contract. System access stays in Rust.
 export const flowApi: FlowAPI = {
   getState: () => invoke<AppState>("get_state"),
+  getWebUIStatus: () => invoke<WebUIStatus>("get_webui_status"),
   installWebUI: (installationDir: string) => invoke<void>("install_web_ui", { installationDir }),
   cancelInstall: () => invoke<void>("cancel_install"),
   launchWebUI: () => invoke<void>("launch_web_ui"),

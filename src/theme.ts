@@ -9,12 +9,12 @@ interface ThemeOption {
 
 const STORAGE_KEY = "flow.theme";
 const OPTIONS: readonly ThemeOption[] = [
-  { id: "light", label: "Светлая", description: "Чистая и воздушная", group: "standard" },
-  { id: "dark", label: "Тёмная", description: "Сдержанная классика", group: "standard" },
+  { id: "light", label: "Светлая", description: "Чистый нейтральный фон", group: "standard" },
+  { id: "dark", label: "Тёмная", description: "Графит и холодный синий", group: "standard" },
   { id: "system", label: "Системная", description: "Следует за Windows", group: "standard" },
   { id: "zakaz", label: "Заказ", description: "Уголь, янтарь и бордо", group: "extra" },
-  { id: "crimson-moon", label: "Багровая Луна", description: "Бархатный полумрак", group: "extra" },
-  { id: "blueviolet-dusk", label: "Синелетовые сумерки", description: "Синий свет и неон", group: "extra" }
+  { id: "crimson-moon", label: "Багровая Луна", description: "Уголь и приглушённый красный", group: "extra" },
+  { id: "blueviolet-dusk", label: "Синелетовые сумерки", description: "Холодный синий и лаванда", group: "extra" }
 ];
 
 function savedTheme(): Theme {

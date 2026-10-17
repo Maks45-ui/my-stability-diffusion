@@ -270,7 +270,7 @@ function renderPackages(state: AppState): void {
     const details = make("div", "package-details");
     details.append(make("h3", "", item.name), make("p", "", `${item.version} · Stable Diffusion`), make("small", "", item.path));
     if (item.readyUrl) details.append(make("small", "package-url", item.readyUrl));
-    const badge = make("span", "package-state", item.stopping ? "● Останавливается" : item.readyUrl ? "● Запущен" : item.running ? "● Запускается" : item.stopped ? "● Остановлен" : "● Готов");
+    const badge = make("span", "package-state", item.stopping ? "Останавливается" : item.readyUrl ? "Запущен" : item.running ? "Запускается" : item.stopped ? "Остановлен" : "Готов");
     badge.dataset.state = item.stopping ? "stopping" : item.readyUrl ? "running" : item.running ? "starting" : item.stopped ? "stopped" : "ready";
     card.append(icon, details, badge);
     const actions = make("div", "package-actions");
@@ -335,9 +335,50 @@ async function refreshState(): Promise<void> {
   const sequence = ++stateSequence;
   try {
     const state = await window.flow.getState();
-    if (sequence === stateSequence) renderPackages(state);
+    if (sequence === stateSequence) {
+      renderPackages(state);
+      void refreshWebUIStatus();
+    }
   } catch (error) {
     if (sequence === stateSequence) notify(message(error));
+  }
+}
+
+let runtimeSequence = 0;
+
+async function refreshWebUIStatus(): Promise<void> {
+  const sequence = ++runtimeSequence;
+  try {
+    const status = await window.flow.getWebUIStatus();
+    if (sequence !== runtimeSequence) return;
+    const ready = status.running && status.port !== null && status.pingMs !== null;
+    const mode = ready ? "ready" : status.running ? "pending" : "offline";
+    element<HTMLElement>("runtime-dot").dataset.state = mode;
+    element<HTMLElement>("sidebar-status-dot").dataset.state = mode;
+    element<HTMLElement>("runtime-state").textContent = ready ? "Запущен" : status.running ? "Запускается" : "Остановлен";
+    element<HTMLElement>("sidebar-status-label").textContent = ready ? "WebUI запущен" : status.running ? "WebUI запускается" : "WebUI не запущен";
+    element<HTMLElement>("system-status").textContent = ready ? "WebUI запущен" : status.running ? "Запуск WebUI" : "Остановлен";
+    element<HTMLElement>("runtime-port").textContent = status.port === null ? "—" : `:${status.port}`;
+    element<HTMLElement>("runtime-ping").textContent = status.pingMs === null ? "—" : `${status.pingMs} ms`;
+    const used = status.vramUsedGb;
+    const total = status.vramTotalGb;
+    element<HTMLElement>("runtime-vram").textContent = used !== null && total !== null
+      ? `${used.toFixed(1)} / ${total.toFixed(1)} GB` : "— / — GB";
+    const model = status.activeModel?.trim() || "—";
+    const modelNode = element<HTMLElement>("runtime-model");
+    modelNode.textContent = model;
+    modelNode.title = model === "—" ? "Доступно при запуске WebUI с --api" : model;
+  } catch {
+    if (sequence !== runtimeSequence) return;
+    element<HTMLElement>("runtime-dot").dataset.state = "offline";
+    element<HTMLElement>("sidebar-status-dot").dataset.state = "offline";
+    element<HTMLElement>("runtime-state").textContent = "Недоступен";
+    element<HTMLElement>("sidebar-status-label").textContent = "Нет связи с WebUI";
+    element<HTMLElement>("system-status").textContent = "Нет связи";
+    element<HTMLElement>("runtime-port").textContent = "—";
+    element<HTMLElement>("runtime-ping").textContent = "—";
+    element<HTMLElement>("runtime-vram").textContent = "— / — GB";
+    element<HTMLElement>("runtime-model").textContent = "—";
   }
 }
 
@@ -701,6 +742,8 @@ void window.flow.onTask(onTask).catch((error: unknown) => notify(message(error))
 const firstRun = new FirstRunController(flowApi, element<HTMLElement>("app-shell"), (file, type, name) => downloadManager.enqueue(file, type, name), () => { void refreshState(); });
 void firstRun.start().catch((error: unknown) => notify(message(error)));
 void refreshState();
+window.setInterval(() => { if (document.visibilityState === "visible") void refreshWebUIStatus(); }, 15_000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") void refreshWebUIStatus(); });
 void downloadManager.restore().catch((error: unknown) => notify(message(error)));
 void window.flow.setPage("home").catch(() => { /* Discord may be unavailable. */ });
 window.requestAnimationFrame(updateIndicator);

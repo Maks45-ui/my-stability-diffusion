@@ -5,6 +5,7 @@ mod installer;
 mod paths;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{fs, path::PathBuf, sync::Arc};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
@@ -52,6 +53,57 @@ struct PackageInfo {
     stopping: bool,
     stopped: bool,
     ready_url: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WebuiStatus {
+    running: bool,
+    port: Option<u16>,
+    ping_ms: Option<u64>,
+    vram_used_gb: Option<f64>,
+    vram_total_gb: Option<f64>,
+    active_model: Option<String>,
+}
+
+/// Read only the local WebUI process that Flow started. API metrics are optional.
+#[tauri::command]
+async fn get_webui_status(webui: State<'_, installer::WebuiControl>) -> Result<WebuiStatus, String> {
+    let Some(ready_url) = webui.ready_url() else {
+        return Ok(WebuiStatus { running: webui.is_running(), port: None, ping_ms: None,
+            vram_used_gb: None, vram_total_gb: None, active_model: None });
+    };
+    let port = reqwest::Url::parse(&ready_url).ok().and_then(|url| url.port());
+    let mut status = WebuiStatus { running: true, port, ping_ms: None,
+        vram_used_gb: None, vram_total_gb: None, active_model: None };
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build().map_err(|error| error.to_string())?;
+    let started = std::time::Instant::now();
+    if client.get(&ready_url).send().await.is_ok() {
+        status.ping_ms = Some(started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64);
+    }
+    let memory_url = format!("{ready_url}/sdapi/v1/memory");
+    if let Ok(response) = client.get(memory_url).send().await {
+        if let Ok(memory) = response.error_for_status() {
+            if let Ok(value) = memory.json::<Value>().await {
+                let system = &value["cuda"]["system"];
+                let gib = 1024.0 * 1024.0 * 1024.0;
+                status.vram_used_gb = system["used"].as_f64().map(|bytes| bytes / gib);
+                status.vram_total_gb = system["total"].as_f64().map(|bytes| bytes / gib);
+            }
+        }
+    }
+    let options_url = format!("{ready_url}/sdapi/v1/options");
+    if let Ok(response) = client.get(options_url).send().await {
+        if let Ok(options) = response.error_for_status() {
+            if let Ok(value) = options.json::<Value>().await {
+                status.active_model = value["sd_model_checkpoint"].as_str()
+                    .filter(|model| !model.trim().is_empty()).map(str::to_owned);
+            }
+        }
+    }
+    Ok(status)
 }
 
 #[derive(Clone, Serialize)]
@@ -304,6 +356,7 @@ pub fn run() {
         .manage(Arc::new(civitai::DownloadControl::default()))
         .invoke_handler(tauri::generate_handler![
             get_state,
+            get_webui_status,
             set_installation_dir,
             save_civitai_token,
             get_onboarding_complete,
