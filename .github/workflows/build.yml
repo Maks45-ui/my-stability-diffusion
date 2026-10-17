@@ -19,6 +19,9 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
@@ -27,6 +30,7 @@ jobs:
           workspaces: src-tauri
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
+      - run: python -m unittest discover -s tests -v
       - run: cargo test --manifest-path src-tauri/Cargo.toml --lib --release
       - run: pnpm tauri build --bundles nsis
       - uses: actions/upload-artifact@v4

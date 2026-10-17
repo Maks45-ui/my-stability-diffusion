@@ -378,6 +378,8 @@ h1, h2, h3, p { margin: 0; }
 .webui-memory-card.glass-surface { display: grid; gap: 16px; margin-top: 14px; padding: 18px 20px; border-radius: 18px; background: color-mix(in srgb, var(--glass-bg) 90%, var(--accent-soft)); }
 .webui-memory-card h3 { font-size: 14px; }
 .webui-memory-card p { margin: 7px 0 12px; }
+.webui-memory-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.webui-memory-note { font-size: 11px; line-height: 1.45; }
 .webui-memory-toggle { display: flex; align-items: flex-start; gap: 11px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); color: var(--text); font-size: 12px; line-height: 1.45; cursor: pointer; }
 .webui-memory-toggle input { width: 17px; height: 17px; flex: 0 0 auto; margin: 1px 0 0; accent-color: var(--accent); }
 .webui-xformers { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }

@@ -259,7 +259,17 @@ fn pipe_logs(app: AppHandle, kind: &'static str, phase: &'static str, mut reader
     })
 }
 
-fn tail_webui_log(app: AppHandle, mut reader: fs::File, control: WebuiControl) -> thread::JoinHandle<()> {
+fn emit_webui_line(app: &AppHandle, control: &WebuiControl, line: &[u8], source: &'static str) {
+    if source == "stderr" {
+        let mut tagged = b"[stderr] ".to_vec();
+        tagged.extend_from_slice(line);
+        emit_pipe_line(app, "launch", "log", &tagged, None, Some(control));
+    } else {
+        emit_pipe_line(app, "launch", "log", line, None, Some(control));
+    }
+}
+
+fn tail_webui_log(app: AppHandle, mut reader: fs::File, control: WebuiControl, source: &'static str) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut buffer = [0_u8; 4096];
         let mut line = Vec::new();
@@ -271,13 +281,13 @@ fn tail_webui_log(app: AppHandle, mut reader: fs::File, control: WebuiControl) -
                     for &byte in &buffer[..count] {
                         if byte == b'\n' || byte == b'\r' {
                             if !line.is_empty() {
-                                emit_pipe_line(&app, "launch", "log", &line, None, Some(&control));
+                                emit_webui_line(&app, &control, &line, source);
                                 line.clear();
                             }
                         } else {
                             line.push(byte);
                             if line.len() >= 16_384 {
-                                emit_pipe_line(&app, "launch", "log", &line, None, Some(&control));
+                            emit_webui_line(&app, &control, &line, source);
                                 line.clear();
                             }
                         }
@@ -289,7 +299,7 @@ fn tail_webui_log(app: AppHandle, mut reader: fs::File, control: WebuiControl) -
                 }
             }
         }
-        if !line.is_empty() { emit_pipe_line(&app, "launch", "log", &line, None, Some(&control)); }
+        if !line.is_empty() { emit_webui_line(&app, &control, &line, source); }
     })
 }
 
@@ -329,6 +339,50 @@ fn run_logged(app: &AppHandle, control: &InstallControl, program: &str, args: &[
 }
 
 const SDXL_ALLOC_CONF: &str = "backend:native,garbage_collection_threshold:0.6,max_split_size_mb:128";
+const FLOW_SAFE_SWITCH: &str = include_str!("../resources/flow_safe_switch.py");
+
+fn ensure_flow_safe_switch_extension(directory: &Path) -> Result<(), String> {
+    let script = directory.join("extensions/flow-safe-switch/scripts/flow_safe_switch.py");
+    fs::create_dir_all(script.parent().expect("extension script has a parent"))
+        .map_err(|error| format!("Не удалось создать расширение очистки памяти: {error}"))?;
+    fs::write(&script, FLOW_SAFE_SWITCH)
+        .map_err(|error| format!("Не удалось обновить расширение очистки памяти: {error}"))
+}
+
+fn nvidia_vram_mib() -> Option<u64> {
+    let mut candidates = vec![PathBuf::from("nvidia-smi")];
+    if cfg!(windows) {
+        if let Some(program_files) = std::env::var_os("ProgramFiles") {
+            candidates.push(PathBuf::from(program_files).join("NVIDIA Corporation/NVSMI/nvidia-smi.exe"));
+        }
+    }
+    for program in candidates {
+        let mut command = Command::new(program);
+        command.args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"])
+            .stdin(Stdio::null());
+        hide_console(&mut command);
+        if let Ok(output) = command.output() {
+            if output.status.success() {
+                if let Some(mib) = String::from_utf8_lossy(&output.stdout).lines().next().and_then(|line| line.trim().parse().ok()) {
+                    return Some(mib);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn apply_memory_flags(arguments: &mut Vec<String>, memory_profile: bool, vram_mib: Option<u64>) -> bool {
+    let low_vram = vram_mib.is_some_and(|mib| mib <= 5_120);
+    if !memory_profile && !low_vram { return false; }
+    let has_vram_flag = arguments.iter().any(|argument| matches!(argument.as_str(), "--lowvram" | "--medvram" | "--medvram-sdxl"));
+    let has_attention_flag = arguments.iter().any(|argument| matches!(argument.as_str(), "--xformers" | "--opt-sub-quad-attention" | "--opt-sdp-attention" | "--opt-sdp-no-mem-attention"));
+    if !has_vram_flag {
+        arguments.push(if low_vram { "--lowvram" } else { "--medvram-sdxl" }.to_owned());
+    }
+    if !has_attention_flag { arguments.push("--opt-sub-quad-attention".to_owned()); }
+    true
+}
 
 fn update_sdxl_memory_config(config: &mut serde_json::Value) -> Result<(), String> {
     let options = config.as_object_mut().ok_or("config.json WebUI должен содержать объект JSON.")?;
@@ -642,16 +696,25 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, inst
     if !directory.join("launch.py").is_file() { return Err("Файл запуска WebUI не найден.".to_owned()); }
     let python = if cfg!(windows) { directory.join("venv/Scripts/python.exe") } else { directory.join("venv/bin/python") };
     if !python.is_file() { return Err("Виртуальное окружение WebUI не найдено.".to_owned()); }
-    let arguments = parse_webui_arguments(&crate::webui_arguments(&app)?)?;
-    let memory_profile = crate::sdxl_memory_profile(&app)?;
-    if memory_profile { apply_sdxl_memory_settings(&directory)?; }
+    let mut arguments = parse_webui_arguments(&crate::webui_arguments(&app)?)?;
+    let detected_vram = nvidia_vram_mib();
+    let memory_profile = apply_memory_flags(&mut arguments, crate::sdxl_memory_profile(&app)?, detected_vram);
+    if memory_profile {
+        if arguments.iter().any(|arg| matches!(arg.as_str(), "--disable-extra-extensions" | "--disable-all-extensions")) {
+            return Err("Режим безопасной смены моделей требует расширение Flow. Уберите --disable-extra-extensions/--disable-all-extensions из аргументов запуска.".to_owned());
+        }
+        apply_sdxl_memory_settings(&directory)?;
+        ensure_flow_safe_switch_extension(&directory)?;
+    }
     // webui-user.bat clears COMMANDLINE_ARGS and does not forward its own arguments.
     // Passing args directly to launch.py also avoids shell quoting and a visible CMD window.
     let mut command = Command::new(python);
-    command.arg("-u").arg("launch.py").args(arguments);
+    command.arg("-u").arg("launch.py").args(&arguments);
     use_local_clip_sources(&mut command, &directory);
     command.current_dir(&directory)
         .env("PYTHONUNBUFFERED", "1")
+        .env("PYTHONIOENCODING", "utf-8:backslashreplace")
+        .env("PYTHONFAULTHANDLER", "1")
         .env("WEBUI_LAUNCH_LIVE_OUTPUT", "1")
         .env("STABLE_DIFFUSION_REPO", SD_REPO)
         // The saved flags are passed as argv; inherited COMMANDLINE_ARGS must not repeat them.
@@ -661,6 +724,9 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, inst
         // Configure only this Python process, before torch is imported.
         command.env("PYTORCH_CUDA_ALLOC_CONF", SDXL_ALLOC_CONF);
         command.env("PYTORCH_ALLOC_CONF", SDXL_ALLOC_CONF);
+        command.env("FLOW_SAFE_MODEL_SWITCH", "1");
+    } else {
+        command.env_remove("FLOW_SAFE_MODEL_SWITCH");
     }
     hide_console(&mut command);
     if webui.running.swap(true, Ordering::SeqCst) { return Err("WebUI уже запущен или запускается.".to_owned()); }
@@ -671,25 +737,25 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, inst
     webui.generation.fetch_add(1, Ordering::SeqCst);
     *webui.ready_url.lock().unwrap_or_else(|poison| poison.into_inner()) = None;
     // Python writes to a real file. A WebView2/Flow crash cannot close its stdout pipe.
-    let log_setup = (|| -> Result<(fs::File, fs::File, PathBuf), String> {
+    let log_setup = (|| -> Result<(fs::File, fs::File, fs::File, fs::File, PathBuf, PathBuf), String> {
         let log_dir = crate::data_dir(&app)?.join("logs");
         fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
         let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
-        let log_path = log_dir.join(format!("webui-{}-{stamp}.log", std::process::id()));
-        let writer = fs::OpenOptions::new().append(true).create_new(true).open(&log_path)
+        let log_path = log_dir.join(format!("webui-{}-{stamp}.stdout.log", std::process::id()));
+        let stderr_path = log_dir.join(format!("webui-{}-{stamp}.stderr.log", std::process::id()));
+        let stdout_writer = fs::OpenOptions::new().append(true).create_new(true).open(&log_path)
             .map_err(|error| format!("Не удалось создать журнал WebUI: {error}"))?;
-        let reader = fs::File::open(&log_path).map_err(|error| format!("Не удалось открыть журнал WebUI: {error}"))?;
-        Ok((writer, reader, log_path))
+        let stderr_writer = fs::OpenOptions::new().append(true).create_new(true).open(&stderr_path)
+            .map_err(|error| format!("Не удалось создать журнал ошибок WebUI: {error}"))?;
+        let stdout_reader = fs::File::open(&log_path).map_err(|error| format!("Не удалось открыть журнал WebUI: {error}"))?;
+        let stderr_reader = fs::File::open(&stderr_path).map_err(|error| format!("Не удалось открыть журнал ошибок WebUI: {error}"))?;
+        Ok((stdout_writer, stderr_writer, stdout_reader, stderr_reader, log_path, stderr_path))
     })();
-    let (writer, reader, log_path) = match log_setup {
+    let (stdout_writer, stderr_writer, stdout_reader, stderr_reader, log_path, stderr_path) = match log_setup {
         Ok(files) => files,
         Err(error) => { webui.running.store(false, Ordering::SeqCst); return Err(error); }
     };
-    let stdout = match writer.try_clone() {
-        Ok(file) => file,
-        Err(error) => { webui.running.store(false, Ordering::SeqCst); return Err(format!("Не удалось открыть вывод WebUI: {error}")); }
-    };
-    command.stdout(Stdio::from(stdout)).stderr(Stdio::from(writer));
+    command.stdout(Stdio::from(stdout_writer)).stderr(Stdio::from(stderr_writer));
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
@@ -711,10 +777,18 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, inst
     }
     *webui.pid.lock().unwrap_or_else(|poison| poison.into_inner()) = Some(child.id());
     notify_kind(&app, "launch", "starting", "WebUI запускается…");
-    notify_kind(&app, "launch", "log", format!("Журнал WebUI: {}", log_path.display()));
+    if let Some(mib) = detected_vram {
+        notify_kind(&app, "launch", "log", format!("NVIDIA VRAM: {mib} MiB; режим экономии памяти: {}.", if memory_profile { "включён" } else { "выключен" }));
+    }
+    if memory_profile {
+        notify_kind(&app, "launch", "log", format!("Флаги памяти и attention: {}", arguments.iter().filter(|arg| arg.starts_with("--lowvram") || arg.starts_with("--medvram") || arg.starts_with("--opt-") || arg.as_str() == "--xformers").cloned().collect::<Vec<_>>().join(" ")));
+        notify_kind(&app, "launch", "log", "Безопасная выгрузка предыдущего чекпоинта включена.");
+    }
+    notify_kind(&app, "launch", "log", format!("Журналы WebUI: stdout — {}; stderr — {}", log_path.display(), stderr_path.display()));
     let control = (*webui).clone();
     thread::spawn(move || {
-        let logger = tail_webui_log(app.clone(), reader, control.clone());
+        let stdout_logger = tail_webui_log(app.clone(), stdout_reader, control.clone(), "stdout");
+        let stderr_logger = tail_webui_log(app.clone(), stderr_reader, control.clone(), "stderr");
         let result = child.wait();
         control.exited.store(true, Ordering::SeqCst);
         let was_stopping = control.stopping.swap(false, Ordering::SeqCst);
@@ -724,7 +798,8 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, inst
                 let _ = job.terminate();
             }
         }
-        let _ = logger.join();
+        let _ = stdout_logger.join();
+        let _ = stderr_logger.join();
         let was_ready = control.ready_url.lock().unwrap_or_else(|poison| poison.into_inner()).is_some();
         *control.pid.lock().unwrap_or_else(|poison| poison.into_inner()) = None;
         *control.ready_url.lock().unwrap_or_else(|poison| poison.into_inner()) = None;
@@ -734,7 +809,7 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, inst
             Ok(_) if was_stopping => notify_kind(&app, "launch", "done", "WebUI остановлен пользователем."),
             Ok(status) if status.success() && was_ready => notify_kind(&app, "launch", "done", "WebUI остановлен."),
             Ok(status) if status.success() => notify_kind(&app, "launch", "error", "WebUI завершился до появления локального адреса."),
-            Ok(status) if status.code() == Some(-1073741819) => notify_kind(&app, "launch", "error", "WebUI аварийно завершился: 0xC0000005 (нарушение доступа). Проверьте последние строки лога WebUI и журнал событий Windows."),
+            Ok(status) if status.code() == Some(-1073741819) => notify_kind(&app, "launch", "error", format!("WebUI аварийно завершился: 0xC0000005. Python faulthandler включён; traceback (если Python успел его записать) находится в {}. Если traceback отсутствует, проверьте журнал событий Windows.", stderr_path.display())),
             Ok(status) => notify_kind(&app, "launch", "error", format!("WebUI завершился с кодом {:?}.", status.code())),
             Err(error) => notify_kind(&app, "launch", "error", format!("Ошибка процесса WebUI: {error}")),
         }
@@ -794,7 +869,26 @@ pub(crate) fn open_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) -> Res
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_webui_arguments, parse_webui_ready_url, update_sdxl_memory_config};
+    use super::{apply_memory_flags, parse_webui_arguments, parse_webui_ready_url, update_sdxl_memory_config};
+
+    #[test]
+    fn four_gib_gpu_gets_lowvram_and_attention_once() {
+        let mut arguments = vec!["--api".to_owned()];
+        assert!(apply_memory_flags(&mut arguments, false, Some(4096)));
+        assert_eq!(arguments.iter().map(String::as_str).collect::<Vec<_>>(), ["--api", "--lowvram", "--opt-sub-quad-attention"]);
+        assert!(apply_memory_flags(&mut arguments, false, Some(4096)));
+        assert_eq!(arguments.len(), 3);
+    }
+
+    #[test]
+    fn chosen_memory_flags_are_respected() {
+        let mut arguments = vec!["--medvram-sdxl".to_owned(), "--xformers".to_owned()];
+        assert!(apply_memory_flags(&mut arguments, true, None));
+        assert_eq!(arguments.iter().map(String::as_str).collect::<Vec<_>>(), ["--medvram-sdxl", "--xformers"]);
+        let mut no_profile = Vec::new();
+        assert!(!apply_memory_flags(&mut no_profile, false, None));
+        assert!(no_profile.is_empty());
+    }
 
     #[test]
     fn webui_ready_url_uses_reported_port() {

@@ -665,15 +665,17 @@ document.querySelectorAll<HTMLButtonElement>(".webui-quick-arg").forEach((button
     } else addWebuiArgument(argument);
   });
 });
-element<HTMLButtonElement>("apply-sdxl-profile").addEventListener("click", () => {
+function applyMemoryPreset(vramFlag: "--lowvram" | "--medvram-sdxl", label: string): void {
   if (!webuiSettingsReady) return;
   webuiDraft = webuiDraft.filter((item) => !attentionFlags.has(webuiArgumentName(item)) && !vramFlags.has(webuiArgumentName(item)));
-  webuiDraft.push("--lowvram", "--opt-sub-quad-attention");
+  webuiDraft.push(vramFlag, "--opt-sub-quad-attention");
   sdxlMemoryProfile.checked = true;
   webuiSettingsDirty = true;
   renderWebuiArguments();
-  setWebuiSettingsMessage("Профиль 4 ГБ подготовлен. Сохраните настройки и перезапустите WebUI.");
-});
+  setWebuiSettingsMessage(`${label} подготовлен. Сохраните настройки и перезапустите WebUI.`);
+}
+element<HTMLButtonElement>("apply-sdxl-profile").addEventListener("click", () => applyMemoryPreset("--lowvram", "Профиль 4 ГБ"));
+element<HTMLButtonElement>("apply-sdxl-balanced").addEventListener("click", () => applyMemoryPreset("--medvram-sdxl", "Профиль SDXL"));
 sdxlMemoryProfile.addEventListener("change", () => setWebuiSettingsMessage("Есть несохранённые изменения"));
 element<HTMLButtonElement>("check-xformers").addEventListener("click", async () => {
   xformersStatus.textContent = "Проверка окружения…";
