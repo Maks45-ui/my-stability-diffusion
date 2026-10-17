@@ -8,18 +8,19 @@
   <link rel="stylesheet" href="/src/styles.css" />
   <link rel="stylesheet" href="/src/glass.css" />
   <link rel="stylesheet" href="/src/professional.css" />
+  <link rel="stylesheet" href="/src/boykisser.css" />
 </head>
 <body>
   <div class="splash-screen" id="splash-screen" role="status" aria-label="Запуск Flow">
     <div class="splash-glow" aria-hidden="true"></div>
-    <div class="splash-brand"><img src="/assets/logo.png" alt="" /><span>Flow</span></div>
+    <div class="splash-brand"><img data-flow-logo src="/assets/logo.png" alt="" /><span>Flow</span></div>
     <p>Творчество начинается здесь</p>
   </div>
   <div class="app-shell" id="app-shell">
     <aside class="sidebar glass-surface" id="sidebar" aria-label="Навигация">
       <div class="sidebar-top">
         <button class="icon-button menu-toggle" id="menu-toggle" type="button" aria-label="Свернуть меню" aria-controls="navigation" aria-expanded="true" title="Свернуть меню">☰</button>
-        <div class="sidebar-brand"><img src="/assets/logo.png" alt="" /><span>Flow</span></div>
+        <div class="sidebar-brand"><img data-flow-logo src="/assets/logo.png" alt="" /><span>Flow</span></div>
       </div>
       <nav class="navigation" id="navigation">
         <span class="nav-indicator" id="nav-indicator" aria-hidden="true"></span>
@@ -33,7 +34,7 @@
 
     <main class="main">
       <header class="topbar">
-        <div class="topbar-brand"><img src="/assets/logo.png" alt="Логотип Flow" /><div><strong>Flow</strong><span>AI MANAGER</span></div></div>
+        <div class="topbar-brand"><img data-flow-logo src="/assets/logo.png" alt="Логотип Flow" /><div><strong>Flow</strong><span>AI MANAGER</span></div></div>
         <div class="runtime-status" aria-label="Состояние WebUI">
           <div class="runtime-cell runtime-connection"><span class="runtime-label">WEBUI</span><div class="runtime-value"><i class="runtime-dot" id="runtime-dot" data-state="offline" aria-hidden="true"></i><span id="runtime-state">Остановлен</span><span class="runtime-secondary" id="runtime-port">—</span><span class="runtime-secondary" id="runtime-ping">—</span></div></div>
           <div class="runtime-cell" title="Данные VRAM доступны при запуске WebUI с флагом --api"><span class="runtime-label">VRAM</span><span class="runtime-value runtime-mono" id="runtime-vram">— / — GB</span></div>
@@ -71,6 +72,7 @@
             <div class="theme-picker" id="theme-picker">
               <section class="theme-group" aria-labelledby="theme-standard-title"><div class="theme-group-heading"><h3 id="theme-standard-title">Стандартные</h3><p>Привычные режимы на каждый день</p></div><div class="theme-options" id="theme-standard"></div></section>
               <section class="theme-group" aria-labelledby="theme-extra-title"><div class="theme-group-heading"><h3 id="theme-extra-title">Дополнительные</h3><p>Атмосферные палитры для рабочего пространства</p></div><div class="theme-options" id="theme-extra"></div></section>
+              <section class="theme-group" aria-labelledby="theme-custom-title"><div class="theme-group-heading"><h3 id="theme-custom-title">Кастомные</h3><p>Темы с собственными обоями и звуками</p></div><div class="theme-options" id="theme-custom"></div></section>
             </div>
             <div class="setting-row"><div><h2>Язык</h2><p>Язык интерфейса</p></div><span class="setting-value">Русский</span></div>
             <div class="setting-row installation-row"><div><h2>Папка установки Stable Diffusion</h2><p>Flow создаст в выбранной папке каталог sd-webui.</p></div></div>
@@ -87,7 +89,7 @@
 
   <dialog class="modal glass-surface first-run-dialog" id="first-run-dialog" aria-labelledby="first-run-title" aria-describedby="first-run-intro">
     <div class="first-run-header">
-      <img src="/assets/logo.png" alt="" />
+      <img data-flow-logo src="/assets/logo.png" alt="" />
       <div><span class="eyebrow">ПЕРВЫЙ ЗАПУСК FLOW</span><h2 id="first-run-title">Перед тем как начать</h2></div>
     </div>
     <p id="first-run-intro">Подключите Civitai, чтобы искать и скачивать модели. Этот шаг можно выполнить позже в настройках.</p>

@@ -50,6 +50,7 @@ const downloadManager = new DownloadManager(
 new ThemeController(
   element<HTMLElement>("theme-standard"),
   element<HTMLElement>("theme-extra"),
+  element<HTMLElement>("theme-custom"),
   element<HTMLElement>("theme-state"),
   element<HTMLElement>("theme-toggle-label"),
   element<HTMLElement>("theme-toggle-icon")

@@ -1,0 +1,45 @@
+/* All image and glass overrides are scoped to this theme only. */
+html[data-theme="boykisser"] body,
+html[data-theme="boykisser"] .app-shell,
+html[data-theme="boykisser"] .splash-screen {
+  background: #f5f4f2 url("/assets/boykisser-wallpaper.jpg") center center / cover no-repeat;
+}
+
+html[data-theme="boykisser"] .main,
+html[data-theme="boykisser"] .content { background: transparent; }
+
+html[data-theme="boykisser"] .sidebar.glass-surface,
+html[data-theme="boykisser"] .topbar,
+html[data-theme="boykisser"] .glass-surface,
+html[data-theme="boykisser"] .stat-card.glass-surface,
+html[data-theme="boykisser"] .panel.glass-surface,
+html[data-theme="boykisser"] .package-card.glass-surface,
+html[data-theme="boykisser"] .model-card.glass-surface,
+html[data-theme="boykisser"] .download-card.glass-surface,
+html[data-theme="boykisser"] .modal.glass-surface,
+html[data-theme="boykisser"] .console-panel.glass-surface,
+html[data-theme="boykisser"] .toast.glass-surface {
+  background: var(--panel);
+  border-color: var(--line);
+  -webkit-backdrop-filter: blur(16px) saturate(1.1);
+  backdrop-filter: blur(16px) saturate(1.1);
+}
+
+html[data-theme="boykisser"] .sidebar.glass-surface { background: var(--sidebar); }
+html[data-theme="boykisser"] .topbar { background: rgba(255, 255, 255, .65); }
+html[data-theme="boykisser"] .modal.glass-surface { background: rgba(255, 255, 255, .87); }
+html[data-theme="boykisser"] .first-run-steps li,
+html[data-theme="boykisser"] .first-run-model-card,
+html[data-theme="boykisser"] .gallery-card,
+html[data-theme="boykisser"] .search-field,
+html[data-theme="boykisser"] .downloads-empty {
+  background: var(--surface);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+html[data-theme="boykisser"] .theme-option[data-theme-option="boykisser"] {
+  --preview-bg: #f5f4f2;
+  --preview-panel: #fff;
+  --preview-accent: #a04b78;
+}

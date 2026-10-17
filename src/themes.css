@@ -136,3 +136,23 @@ html[data-theme="blueviolet-dusk"] {
   --danger: #d995a9;
   --overlay: rgba(8, 10, 16, .72);
 }
+
+html[data-theme="boykisser"] {
+  color-scheme: light;
+  --bg: #e9e8e6;
+  --sidebar: rgba(250, 249, 247, .76);
+  --panel: rgba(255, 255, 255, .75);
+  --surface: rgba(255, 255, 255, .62);
+  --line: rgba(37, 34, 38, .18);
+  --text: #27252a;
+  --muted: #59545c;
+  --text-subtle: #716b73;
+  --accent: #a04b78;
+  --accent-hover: #853a63;
+  --accent-soft: rgba(160, 75, 120, .15);
+  --on-accent: #fff;
+  --success: #357c64;
+  --warning: #956621;
+  --danger: #ab4557;
+  --overlay: rgba(31, 28, 32, .32);
+}
