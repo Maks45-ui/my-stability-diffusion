@@ -31,6 +31,8 @@ const terminal = element<HTMLElement>("terminal-log");
 const consolePanel = element<HTMLElement>("console-panel");
 const consoleToggle = element<HTMLButtonElement>("toggle-terminal");
 const consoleCancel = element<HTMLButtonElement>("cancel-terminal-install");
+const consoleStop = element<HTMLButtonElement>("stop-terminal-webui");
+const consoleRestart = element<HTMLButtonElement>("restart-terminal-webui");
 const consoleStatus = element<HTMLElement>("console-status");
 const packageList = element<HTMLElement>("package-list");
 const galleryGrid = element<HTMLElement>("gallery-grid");
@@ -63,6 +65,9 @@ let debounceTimer: number | undefined;
 let toastTimer: number | undefined;
 let installing = false;
 let stoppingWebui = false;
+let webuiControlBusy = false;
+let hasWebuiPackage = false;
+let webuiRunning = false;
 let installationDir = "";
 let logFrame: number | undefined;
 let terminalHasOutput = false;
@@ -109,6 +114,59 @@ function setInstalling(value: boolean): void {
   element<HTMLButtonElement>("start-install").disabled = value;
   consoleCancel.hidden = !value;
   consoleCancel.disabled = false;
+  updateConsoleControls();
+}
+
+function updateConsoleControls(): void {
+  const unavailable = !hasWebuiPackage || installing || stoppingWebui || webuiControlBusy;
+  consoleStop.disabled = unavailable || !webuiRunning;
+  consoleRestart.disabled = unavailable;
+}
+
+async function waitForWebuiStop(): Promise<void> {
+  const deadline = performance.now() + 15_000;
+  while (performance.now() < deadline) {
+    if (!(await window.flow.getWebUIStatus()).running) return;
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
+  }
+  throw new Error("WebUI не завершился за 15 секунд. Повторите остановку.");
+}
+
+async function controlWebui(restart: boolean): Promise<void> {
+  if (webuiControlBusy || installing || !hasWebuiPackage) return;
+  webuiControlBusy = true;
+  setConsoleVisible(true);
+  updateConsoleControls();
+  try {
+    const running = (await window.flow.getWebUIStatus()).running;
+    if (running) {
+      stoppingWebui = true;
+      updateConsoleControls();
+      setConsoleStatus(restart ? "Перезапуск WebUI" : "Остановка WebUI", "running");
+      queueLog(terminal, restart ? "[WebUI] Перезапуск: останавливаем процесс..." : "[WebUI] Останавливаем процесс...");
+      await window.flow.stopWebUI();
+      await waitForWebuiStop();
+      webuiRunning = false;
+      stoppingWebui = false;
+    }
+    if (restart) {
+      queueLog(terminal, "[WebUI] Запускаем процесс заново...");
+      setConsoleStatus("Запуск WebUI", "running");
+      await window.flow.launchWebUI();
+      webuiRunning = true;
+    } else {
+      setConsoleStatus("WebUI остановлен", "done");
+    }
+  } catch (error) {
+    stoppingWebui = false;
+    setConsoleStatus(restart ? "Ошибка перезапуска" : "Ошибка остановки", "error");
+    queueLog(terminal, `[WebUI] ${message(error)}`);
+    notify(message(error));
+  } finally {
+    webuiControlBusy = false;
+    updateConsoleControls();
+    await refreshState();
+  }
 }
 
 function showInstallationDir(path: string): void {
@@ -254,6 +312,9 @@ function showPage(page: Page): void {
 function renderPackages(state: AppState): void {
   packageList.replaceChildren();
   const count = state.packages.length;
+  hasWebuiPackage = count > 0;
+  webuiRunning = state.packages.some((item) => item.running);
+  updateConsoleControls();
   element<HTMLElement>("package-count").textContent = String(count);
   element<HTMLElement>("package-badge").textContent = `${count} ${count === 1 ? "пакет" : "пакетов"}`;
   element<HTMLElement>("models-path").textContent = state.modelsPath;
@@ -277,7 +338,7 @@ function renderPackages(state: AppState): void {
     const actions = make("div", "package-actions");
     const launch = make("button", "primary-button", "Запустить");
     launch.type = "button";
-    launch.disabled = item.running || stoppingWebui;
+    launch.disabled = item.running || stoppingWebui || webuiControlBusy || installing;
     launch.addEventListener("click", async () => {
       launch.disabled = true;
       setConsoleVisible(true);
@@ -285,6 +346,8 @@ function renderPackages(state: AppState): void {
       queueLog(terminal, "[WebUI] Запуск...");
       try {
         await window.flow.launchWebUI();
+        webuiRunning = true;
+        updateConsoleControls();
         await refreshState();
       }
       catch (error) {
@@ -304,24 +367,8 @@ function renderPackages(state: AppState): void {
     });
     const stop = make("button", "secondary-button package-stop", "Остановить");
     stop.type = "button";
-    stop.disabled = !item.running || item.stopping || stoppingWebui;
-    stop.addEventListener("click", async () => {
-      if (stoppingWebui) return;
-      stoppingWebui = true;
-      stop.disabled = true;
-      launch.disabled = true;
-      setConsoleVisible(true);
-      setConsoleStatus("Остановка WebUI", "running");
-      try {
-        await window.flow.stopWebUI();
-        await refreshState();
-      } catch (error) {
-        stoppingWebui = false;
-        queueLog(terminal, `[WebUI] ${message(error)}`);
-        notify(message(error));
-        await refreshState();
-      }
-    });
+    stop.disabled = !item.running || item.stopping || stoppingWebui || webuiControlBusy;
+    stop.addEventListener("click", () => void controlWebui(false));
     const settings = make("button", "secondary-button", "Настройки");
     settings.type = "button";
     settings.prepend(make("span", "package-settings-icon", "⚙"));
@@ -352,6 +399,8 @@ async function refreshWebUIStatus(): Promise<void> {
   try {
     const status = await window.flow.getWebUIStatus();
     if (sequence !== runtimeSequence) return;
+    webuiRunning = status.running;
+    updateConsoleControls();
     const ready = status.running && status.port !== null && status.pingMs !== null;
     const mode = ready ? "ready" : status.running ? "pending" : "offline";
     element<HTMLElement>("runtime-dot").dataset.state = mode;
@@ -562,7 +611,11 @@ function onTask(event: TaskEvent): void {
     return;
   }
   if (event.kind === "launch") {
-    if (event.phase === "starting") setConsoleStatus("Запуск WebUI", "running");
+    if (event.phase === "starting") {
+      webuiRunning = true;
+      updateConsoleControls();
+      setConsoleStatus("Запуск WebUI", "running");
+    }
     if (event.phase === "stabilizing") setConsoleStatus("Подготовка WebUI", "running");
     if (event.phase === "ready" && event.url) {
       setConsoleStatus("WebUI запущен", "running");
@@ -571,6 +624,8 @@ function onTask(event: TaskEvent): void {
     if (event.phase === "stopping") setConsoleStatus("Остановка WebUI", "running");
     if (event.phase === "done" || event.phase === "error") {
       stoppingWebui = false;
+      webuiRunning = false;
+      updateConsoleControls();
       setConsoleStatus(event.phase === "done" ? "WebUI остановлен" : "Ошибка WebUI", event.phase === "done" ? "done" : "error");
       if (event.phase === "error") notify(event.message);
       void refreshState();
@@ -584,7 +639,10 @@ function onTask(event: TaskEvent): void {
 document.querySelectorAll<HTMLButtonElement>(".nav-item").forEach((button) => {
   button.addEventListener("click", () => {
     const page = button.dataset.page;
-    if (page === "home" || page === "gallery" || page === "models" || page === "settings") showPage(page);
+    if (page === "home" || page === "gallery" || page === "models" || page === "settings") {
+      setConsoleVisible(false);
+      showPage(page);
+    }
   });
 });
 const menuToggle = element<HTMLButtonElement>("menu-toggle");
@@ -646,6 +704,8 @@ element<HTMLButtonElement>("start-install").addEventListener("click", async () =
   }
 });
 consoleToggle.addEventListener("click", () => setConsoleVisible(!consolePanel.classList.contains("visible")));
+consoleStop.addEventListener("click", () => void controlWebui(false));
+consoleRestart.addEventListener("click", () => void controlWebui(true));
 element<HTMLButtonElement>("close-terminal").addEventListener("click", () => {
   setConsoleVisible(false);
   consoleToggle.focus();

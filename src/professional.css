@@ -198,7 +198,7 @@ button:active:not(:disabled) { transform: translateY(1px) !important; }
 .first-run-model-preview { height: 135px; border-bottom: 1px solid var(--border-subtle); background: var(--surface); color: var(--text-subtle); font-size: 24px; }
 .first-run-model-body { min-height: 164px; padding: 12px; }
 .first-run-model-body h3 { font-size: 13px; }
-.first-run-model-body .first-run-model-status { min-height: 29px; padding: 8px 0; color: var(--text-subtle); font: 10px var(--font-mono); }
+.first-run-model-body .first-run-model-status { min-height: 29px; padding: 8px 0; color: var(--text-subtle); font: 10px/1.4 "Segoe UI", Arial, sans-serif; }
 .first-run-model-progress { font-family: var(--font-mono); }
 .webui-args-card.glass-surface, .webui-memory-card.glass-surface { background: var(--panel); }
 .webui-arg-chip { border-color: var(--border-subtle); background: var(--surface); box-shadow: none; animation: none; }

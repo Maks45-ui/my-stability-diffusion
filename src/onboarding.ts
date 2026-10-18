@@ -1,17 +1,16 @@
 import { startSplashScreen } from "./splash";
+import { onboardingCopy, starterCopy, starterKeys, type StarterKey } from "./onboarding-copy";
 import type { FlowAPI, ModelFile, StarterModel, TaskEvent } from "./types";
-
-type StarterKey = "indigo" | "wai" | "realistic";
 
 function required<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
-  if (!node) throw new Error(`������� ${id} �� ������.`);
+  if (!node) throw new Error(`Элемент ${id} не найден.`);
   return node as T;
 }
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
-  return typeof error === "string" ? error : "�� ������� ��������� ��������.";
+  return typeof error === "string" ? error : "Не удалось выполнить действие.";
 }
 
 /** The model step becomes available only after WebUI has been installed. */
@@ -21,6 +20,7 @@ export class FirstRunController {
   private readonly intro = required<HTMLElement>("first-run-intro");
   private readonly keyStep = required<HTMLElement>("first-run-key-step");
   private readonly modelStep = required<HTMLElement>("first-run-model-step");
+  private readonly modelGrid = required<HTMLElement>("first-run-model-grid");
   private readonly modelError = required<HTMLElement>("first-run-model-error");
   private readonly form = required<HTMLFormElement>("first-run-form");
   private readonly input = required<HTMLInputElement>("first-run-token");
@@ -42,6 +42,10 @@ export class FirstRunController {
     private readonly onComplete: () => void,
     private readonly onAwaitInstallation: () => void
   ) {
+    this.title.textContent = onboardingCopy.keyTitle;
+    this.intro.textContent = onboardingCopy.keyIntro;
+    this.modelSkip.textContent = onboardingCopy.skipModels;
+    this.modelGrid.replaceChildren(...starterKeys.map((key) => this.createCard(key)));
     this.form.addEventListener("submit", (event) => {
       event.preventDefault();
       void this.saveKey(this.input.value.trim());
@@ -53,13 +57,35 @@ export class FirstRunController {
       event.preventDefault();
       void this.api.openCivitaiSite().catch((error: unknown) => this.showError(errorMessage(error)));
     });
-    this.cards().forEach((card) => {
-      const key = card.dataset.starter as StarterKey;
+    starterKeys.forEach((key) => {
+      const card = this.card(key);
       card.querySelector<HTMLButtonElement>(".first-run-download")?.addEventListener("click", () => {
         if (this.models.has(key)) void this.selectModel(key);
         else void this.loadModel(key);
       });
     });
+  }
+
+  private createCard(key: StarterKey): HTMLElement {
+    const copy = starterCopy[key];
+    const card = document.createElement("article");
+    card.className = "first-run-model-card";
+    card.dataset.starter = key;
+    // Only the stable structure is HTML; all visible copy comes from the UTF-8 module.
+    card.innerHTML = `<div class="first-run-model-preview"><img hidden /><span aria-hidden="true">◈</span></div><div class="first-run-model-body"><span class="eyebrow"></span><h3></h3><p class="first-run-model-version"></p><div class="first-run-model-progress" hidden><div class="first-run-model-track"><div></div></div><span class="first-run-model-percent">0%</span></div><p class="first-run-model-status" role="status"></p><button class="primary-button first-run-download" type="button" disabled></button></div>`;
+    const image = card.querySelector<HTMLImageElement>("img");
+    if (image) image.alt = copy.previewAlt;
+    const type = card.querySelector<HTMLElement>(".eyebrow");
+    if (type) type.textContent = copy.type;
+    const title = card.querySelector<HTMLElement>("h3");
+    if (title) title.textContent = copy.name;
+    const version = card.querySelector<HTMLElement>(".first-run-model-version");
+    if (version) version.textContent = copy.version;
+    const status = card.querySelector<HTMLElement>(".first-run-model-status");
+    if (status) status.textContent = onboardingCopy.loading;
+    const button = card.querySelector<HTMLButtonElement>(".first-run-download");
+    if (button) button.textContent = onboardingCopy.download;
+    return card;
   }
 
   async start(): Promise<void> {
@@ -73,7 +99,7 @@ export class FirstRunController {
     if (result.stage >= 3 || result.stage === 1) { this.app.inert = false; return; }
     this.dialog.showModal();
     if (result.stage === 2) this.showModelStep();
-    if (result.error) this.showError(`�� ������� ��������� ������ ������: ${result.error}`);
+    if (result.error) this.showError(`Не удалось проверить первый запуск: ${result.error}`);
     if (result.stage === 0) this.input.focus();
   }
 
@@ -90,17 +116,17 @@ export class FirstRunController {
       if (percent) percent.textContent = `${event.percent}%`;
     }
     if (status && event.phase === "dependencies") {
-      const speed = event.bytesPerSecond ? ` � ${(event.bytesPerSecond / 1048576).toFixed(1)} ��/�` : "";
-      status.textContent = `�����������${speed}`;
+      const speed = event.bytesPerSecond ? ` · ${(event.bytesPerSecond / 1048576).toFixed(1)} МБ/с` : "";
+      status.textContent = `${onboardingCopy.downloading}${speed}`;
     }
     if (event.phase === "done") {
-      if (status) status.textContent = "������ ���������. ��������� Flow�";
+      if (status) status.textContent = onboardingCopy.downloaded;
       this.activeTaskId = null;
       void this.finish();
     } else if (["error", "cancelled", "paused"].includes(event.phase)) {
-      if (status) status.textContent = event.phase === "paused" ? "�������� ��������������. ���������� � ��������." : event.message;
+      if (status) status.textContent = event.phase === "paused" ? onboardingCopy.paused : event.message;
       this.activeTaskId = null;
-      this.modelError.textContent = "����� ������� ������ ������ ��� ������ ������ ��� ��������.";
+      this.modelError.textContent = onboardingCopy.chooseAnother;
       this.enableModelButtons(true);
     }
   }
@@ -119,7 +145,7 @@ export class FirstRunController {
 
   private card(key: StarterKey): HTMLElement {
     const card = this.cards().find((item) => item.dataset.starter === key);
-    if (!card) throw new Error(`�������� ${key} �� �������.`);
+    if (!card) throw new Error(`Карточка ${key} не найдена.`);
     return card;
   }
 
@@ -131,7 +157,7 @@ export class FirstRunController {
   private async saveKey(token: string | null): Promise<void> {
     if (this.busy) return;
     if (token !== null && token.length === 0) {
-      this.showError("������� API-���� ��� ������� ������������.");
+      this.showError("Введите API-ключ или нажмите «Пропустить».");
       this.input.focus();
       return;
     }
@@ -140,7 +166,7 @@ export class FirstRunController {
     this.skip.disabled = true;
     this.input.disabled = true;
     this.status.classList.remove("error");
-    this.status.textContent = "����������";
+    this.status.textContent = "Сохранение…";
     try {
       await this.api.saveOnboardingToken(token);
       this.input.value = "";
@@ -161,15 +187,15 @@ export class FirstRunController {
   }
 
   private showModelStep(): void {
-    this.title.textContent = "�������� ������ ������";
-    this.intro.textContent = "�������� ���� ������ ��� ����� WebUI. ���� ��� ����� ���������� � ������� ������ �����.";
+    this.title.textContent = onboardingCopy.modelTitle;
+    this.intro.textContent = onboardingCopy.modelIntro;
     this.keyStep.hidden = true;
     this.modelStep.hidden = false;
     this.dialog.classList.add("first-run-dialog-models");
     this.modelSkip.focus();
     if (!this.modelsLoaded) {
       this.modelsLoaded = true;
-      for (const key of ["indigo", "wai", "realistic"] as const) void this.loadModel(key);
+      for (const key of starterKeys) void this.loadModel(key);
     }
   }
 
@@ -177,13 +203,13 @@ export class FirstRunController {
     const card = this.card(key);
     const status = card.querySelector<HTMLElement>(".first-run-model-status");
     const button = card.querySelector<HTMLButtonElement>(".first-run-download");
-    if (status) status.textContent = "��������� �������� � ������";
+    if (status) status.textContent = onboardingCopy.loading;
     if (button) button.disabled = true;
     try {
       const model = await this.api.getStarterModel(key);
       this.models.set(key, model);
       if (status) status.textContent = model.file.name;
-      if (button) { button.disabled = this.activeTaskId !== null; button.textContent = "�������"; }
+      if (button) { button.disabled = this.activeTaskId !== null; button.textContent = onboardingCopy.download; }
       if (model.previewUrl) {
         const image = card.querySelector<HTMLImageElement>(".first-run-model-preview img");
         const fallback = card.querySelector<HTMLElement>(".first-run-model-preview span");
@@ -193,8 +219,8 @@ export class FirstRunController {
         }).catch(() => { /* A preview failure does not block the download. */ });
       }
     } catch (error) {
-      if (status) status.textContent = `�� ������� �������� ����: ${errorMessage(error)}`;
-      if (button) { button.disabled = false; button.textContent = "���������"; }
+      if (status) status.textContent = `Не удалось получить файл: ${errorMessage(error)}`;
+      if (button) { button.disabled = false; button.textContent = onboardingCopy.retry; }
     }
   }
 
@@ -214,16 +240,16 @@ export class FirstRunController {
     const name = card.querySelector("h3")?.textContent ?? model.file.name;
     const taskId = this.enqueue(model.file, "Checkpoint", name);
     if (!taskId) {
-      this.modelError.textContent = "��� ������ ��� ���� � ������ ��������. �������� ������� ����� ���������� �������.";
+      this.modelError.textContent = onboardingCopy.alreadyQueued;
       return;
     }
     this.activeTaskId = taskId;
     this.activeKey = key;
-    this.modelError.textContent = "�������� ��� � ����� sd-webui/models/Stable-diffusion. ����� ������ ������, ���� ��� ������������.";
+    this.modelError.textContent = onboardingCopy.downloadLocation;
     const progress = card.querySelector<HTMLElement>(".first-run-model-progress");
     const status = card.querySelector<HTMLElement>(".first-run-model-status");
     if (progress) progress.hidden = false;
-    if (status) status.textContent = "������� ������ ��������";
+    if (status) status.textContent = onboardingCopy.queued;
     this.enableModelButtons(false);
   }
 
@@ -231,7 +257,7 @@ export class FirstRunController {
     if (this.busy) return;
     this.busy = true;
     this.modelSkip.disabled = true;
-    this.modelError.textContent = "��������� ���������";
+    this.modelError.textContent = onboardingCopy.finishing;
     try {
       await this.api.finishOnboarding();
       this.dialog.classList.add("first-run-closing");

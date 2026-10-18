@@ -88,7 +88,7 @@
         <div class="console-heading"><div><span class="eyebrow">ПРОЦЕССЫ FLOW</span><h2 id="console-title">Консоль установки и запуска</h2></div><div class="console-actions"><span class="console-status" id="console-status" data-state="idle">Ожидание</span><button class="icon-button console-close" id="close-terminal" type="button" aria-label="Скрыть консоль" title="Скрыть консоль">×</button></div></div>
         <pre class="log-output console-output" id="terminal-log" role="log" aria-live="polite">Логи установки и запуска WebUI появятся здесь.
 </pre>
-        <div class="console-footer"><span>Консоль можно скрыть — процесс продолжится.</span><div class="console-footer-actions"><button class="secondary-button console-clear" id="clear-terminal" type="button">Очистить</button><button class="secondary-button console-cancel" id="cancel-terminal-install" type="button" hidden>Отменить установку</button></div></div>
+        <div class="console-footer"><span>Консоль можно скрыть — процесс продолжится.</span><div class="console-footer-actions"><button class="secondary-button console-clear" id="clear-terminal" type="button">Очистить</button><button class="secondary-button console-cancel" id="cancel-terminal-install" type="button" hidden>Отменить установку</button><button class="secondary-button console-stop" id="stop-terminal-webui" type="button" disabled>Остановить</button><button class="secondary-button console-restart" id="restart-terminal-webui" type="button" disabled>Перезапустить</button></div></div>
       </section>
     </main>
   </div>
@@ -113,22 +113,9 @@
     </form>
     </div>
     <section id="first-run-model-step" class="first-run-model-step" hidden aria-labelledby="first-run-title">
-      <div class="first-run-model-grid" id="first-run-model-grid">
-        <article class="first-run-model-card" data-starter="indigo">
-          <div class="first-run-model-preview"><img alt="Пример изображения Indigo Furry mix" hidden /><span>◈</span></div>
-          <div class="first-run-model-body"><span class="eyebrow">STABLE DIFFUSION 1.x · CHECKPOINT</span><h3>Indigo Furry mix</h3><p>v120_hybrid</p><div class="first-run-model-progress" hidden><div class="first-run-model-track"><div></div></div><span class="first-run-model-percent">0%</span></div><p class="first-run-model-status" role="status">Загружаем сведения о модели…</p><button class="primary-button first-run-download" type="button" disabled>Скачать</button></div>
-        </article>
-        <article class="first-run-model-card" data-starter="wai">
-          <div class="first-run-model-preview"><img alt="Пример изображения WAI-illustrious-SDXL" hidden /><span>◈</span></div>
-          <div class="first-run-model-body"><span class="eyebrow">ILLUSTRIOUS · CHECKPOINT</span><h3>WAI-illustrious-SDXL</h3><p>v17.0</p><div class="first-run-model-progress" hidden><div class="first-run-model-track"><div></div></div><span class="first-run-model-percent">0%</span></div><p class="first-run-model-status" role="status">Загружаем сведения о модели…</p><button class="primary-button first-run-download" type="button" disabled>Скачать</button></div>
-        </article>
-        <article class="first-run-model-card" data-starter="realistic">
-          <div class="first-run-model-preview"><img alt="Пример изображения Realistic Vision V6.0 B1" hidden /><span>◈</span></div>
-          <div class="first-run-model-body"><span class="eyebrow">STABLE DIFFUSION 1.x · CHECKPOINT</span><h3>Realistic Vision V6.0 B1</h3><p>V5.1 Hyper (VAE)</p><div class="first-run-model-progress" hidden><div class="first-run-model-track"><div></div></div><span class="first-run-model-percent">0%</span></div><p class="first-run-model-status" role="status">Загружаем сведения о модели…</p><button class="primary-button first-run-download" type="button" disabled>Скачать</button></div>
-        </article>
-      </div>
+      <div class="first-run-model-grid" id="first-run-model-grid"></div>
       <div id="first-run-model-error" class="first-run-status" role="status" aria-live="polite"></div>
-      <div class="first-run-actions"><button id="first-run-model-skip" class="secondary-button" type="button">Пропустить и начать работу</button></div>
+      <div class="first-run-actions"><button id="first-run-model-skip" class="secondary-button" type="button"></button></div>
     </section>
   </dialog>
 
