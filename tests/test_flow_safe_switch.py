@@ -1,6 +1,7 @@
 """Behavioral check for Flow's WebUI extension without importing PyTorch."""
 
 import os
+import logging
 import runpy
 import sys
 import threading
@@ -29,6 +30,20 @@ def fake_safetensors():
 
 
 class SafeSwitchTests(unittest.TestCase):
+    def test_only_expected_windows_client_disconnect_is_filtered(self):
+        log_filter = runpy.run_path(str(SCRIPT))["_WindowsClientDisconnectFilter"]()
+        reset = ConnectionResetError("connection closed")
+        reset.winerror = 10054
+        record = logging.LogRecord("asyncio", logging.ERROR, __file__, 1,
+                                   "Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)",
+                                   (), (ConnectionResetError, reset, None))
+        self.assertEqual(log_filter.filter(record), os.name != "nt")
+        record.msg = "A different asyncio callback failed"
+        self.assertTrue(log_filter.filter(record))
+        record.msg = "Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)"
+        reset.winerror = 1455
+        self.assertTrue(log_filter.filter(record))
+
     def test_old_model_is_evicted_before_loading_the_new_one(self):
         calls = []
         current = types.SimpleNamespace(sd_checkpoint_info=types.SimpleNamespace(filename="sd15.safetensors"))

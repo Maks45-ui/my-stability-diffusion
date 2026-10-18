@@ -6,8 +6,24 @@ memory profile (or an automatically detected 4–6 GB NVIDIA GPU).
 
 import gc
 import inspect
+import logging
 import os
 from functools import wraps
+
+
+class _WindowsClientDisconnectFilter(logging.Filter):
+    """Hide the noisy asyncio traceback for a browser connection already gone."""
+
+    _flow_disconnect_filter = True
+
+    def filter(self, record):
+        error = record.exc_info[1] if record.exc_info else None
+        return not (
+            os.name == "nt"
+            and isinstance(error, ConnectionResetError)
+            and getattr(error, "winerror", None) == 10054
+            and "_ProactorBasePipeTransport._call_connection_lost" in record.getMessage()
+        )
 
 
 def _windows_commit_status():
@@ -41,6 +57,10 @@ def _windows_commit_status():
 if os.environ.get("FLOW_SAFE_MODEL_SWITCH") == "1":
     import safetensors.torch
     from modules import devices, sd_hijack, sd_models, sd_unet, sd_vae, shared
+
+    asyncio_logger = logging.getLogger("asyncio")
+    if not any(getattr(item, "_flow_disconnect_filter", False) for item in asyncio_logger.filters):
+        asyncio_logger.addFilter(_WindowsClientDisconnectFilter())
 
     if os.name == "nt":
         original_load_file = safetensors.torch.load_file
