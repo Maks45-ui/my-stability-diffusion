@@ -550,7 +550,13 @@ function onTask(event: TaskEvent): void {
     if (["done", "error", "cancelled"].includes(event.phase)) {
       setConsoleStatus(event.phase === "done" ? "Установлено" : event.phase === "cancelled" ? "Отменено" : "Ошибка установки", event.phase === "done" ? "done" : "error");
       setInstalling(false);
-      if (event.phase === "done") { notify("WebUI установлен."); void refreshState(); }
+      if (event.phase === "done") {
+        notify("WebUI установлен.");
+        void refreshState();
+        void firstRun.onInstallComplete().then(() => {
+          if (element<HTMLDialogElement>("first-run-dialog").open) setConsoleVisible(false);
+        }).catch((error: unknown) => notify(message(error)));
+      }
       else notify(event.message);
     }
     return;
@@ -742,7 +748,13 @@ element<HTMLFormElement>("token-form").addEventListener("submit", async (event) 
 });
 window.addEventListener("resize", updateIndicator);
 void window.flow.onTask(onTask).catch((error: unknown) => notify(message(error)));
-const firstRun = new FirstRunController(flowApi, element<HTMLElement>("app-shell"), (file, type, name) => downloadManager.enqueue(file, type, name), () => { void refreshState(); });
+const firstRun = new FirstRunController(
+  flowApi,
+  element<HTMLElement>("app-shell"),
+  (file, type, name) => downloadManager.enqueue(file, type, name),
+  () => { void refreshState(); },
+  () => notify("Следующий шаг — установите WebUI через «Добавить пакет». Выбор модели откроется после установки.")
+);
 void firstRun.start().catch((error: unknown) => notify(message(error)));
 void refreshState();
 window.setInterval(() => { if (document.visibilityState === "visible") void refreshWebUIStatus(); }, 15_000);

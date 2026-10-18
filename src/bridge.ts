@@ -29,7 +29,6 @@ export const flowApi: FlowAPI = {
   getPreview: (url: string) => invoke<string>("get_preview", { url }),
   saveCivitaiToken: (token: string) => invoke<void>("save_civitai_token", { token }),
   getOnboardingComplete: () => invoke<boolean>("get_onboarding_complete"),
-  completeOnboarding: (token: string | null) => invoke<void>("complete_onboarding", { token }),
   getOnboardingStage: () => invoke<number>("get_onboarding_stage"),
   saveOnboardingToken: (token: string | null) => invoke<void>("save_onboarding_token", { token }),
   finishOnboarding: () => invoke<void>("finish_onboarding"),

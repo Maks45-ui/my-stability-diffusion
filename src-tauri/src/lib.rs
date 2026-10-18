@@ -189,7 +189,7 @@ fn get_state(app: AppHandle, webui: State<'_, installer::WebuiControl>) -> Resul
             .ok()
             .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
             .and_then(|value| value.get("version").and_then(serde_json::Value::as_str).map(str::to_owned))
-            .unwrap_or_else(|| "Установлен".to_owned());
+            .unwrap_or_else(|| "����������".to_owned());
         vec![PackageInfo {
             name: "AUTOMATIC1111 WebUI".to_owned(),
             version,
@@ -220,12 +220,12 @@ fn set_installation_dir(
     downloads: State<'_, Arc<civitai::DownloadControl>>,
 ) -> Result<(), String> {
     if installs.is_running() || webui.is_running() || downloads.is_running() {
-        return Err("Дождитесь завершения установки, работы WebUI или загрузки модели перед сменой папки.".to_owned());
+        return Err("��������� ���������� ���������, ������ WebUI ��� �������� ������ ����� ������ �����.".to_owned());
     }
     let path = paths::subprocess_path(&PathBuf::from(directory.trim()));
     // The dialog returns an existing directory. Recheck in Rust before persisting it.
     if !path.is_absolute() || !path.is_dir() {
-        return Err("Выберите существующую абсолютную папку установки.".to_owned());
+        return Err("�������� ������������ ���������� ����� ���������.".to_owned());
     }
     let normalized = paths::subprocess_path(&path.canonicalize().map_err(|error| error.to_string())?);
     let mut settings = read_settings(&app)?;
@@ -236,7 +236,7 @@ fn set_installation_dir(
 #[tauri::command]
 fn save_civitai_token(app: AppHandle, token: String) -> Result<(), String> {
     if token.len() > 512 {
-        return Err("Некорректный API-ключ.".to_owned());
+        return Err("������������ API-����.".to_owned());
     }
     let mut settings = read_settings(&app)?;
     settings.civitai_token = token.trim().to_owned();
@@ -256,8 +256,21 @@ fn get_onboarding_complete(app: AppHandle) -> Result<bool, String> {
 
 #[tauri::command]
 fn get_onboarding_stage(app: AppHandle) -> Result<u8, String> {
-    if get_onboarding_complete(app.clone())? { return Ok(2); }
-    Ok(read_settings(&app)?.onboarding_stage.min(1))
+    if get_onboarding_complete(app.clone())? { return Ok(3); }
+    let mut settings = read_settings(&app)?;
+    if settings.onboarding_stage >= 1 {
+        let installed = installation_dir(&app)?.join("sd-webui").join(".flow-installed.json").is_file();
+        let stage = pending_onboarding_stage(settings.onboarding_stage, installed);
+        if settings.onboarding_stage != stage {
+            settings.onboarding_stage = stage;
+            write_settings(&app, &settings)?;
+        }
+    }
+    Ok(settings.onboarding_stage.min(2))
+}
+
+fn pending_onboarding_stage(stage: u8, installed: bool) -> u8 {
+    if stage == 0 { 0 } else if installed { 2 } else { 1 }
 }
 
 #[tauri::command]
@@ -271,7 +284,7 @@ fn apply_onboarding_token(settings: &mut Settings, token: Option<String>) -> Res
     if let Some(token) = token {
         let token = token.trim();
         if token.is_empty() || token.len() > 512 || token.chars().any(char::is_whitespace) {
-            return Err("Введите корректный API-ключ без пробелов.".to_owned());
+            return Err("������� ���������� API-���� ��� ��������.".to_owned());
         }
         settings.civitai_token = token.to_owned();
     }
@@ -282,25 +295,13 @@ fn apply_onboarding_token(settings: &mut Settings, token: Option<String>) -> Res
 #[tauri::command]
 fn finish_onboarding(app: AppHandle) -> Result<(), String> {
     let mut settings = read_settings(&app)?;
-    if settings.onboarding_stage != 1 { return Err("Сначала завершите шаг с API-ключом.".to_owned()); }
+    if settings.onboarding_stage != 2
+        || !installation_dir(&app)?.join("sd-webui").join(".flow-installed.json").is_file() {
+        return Err("������� ��������� ��������� WebUI � ����� ������.".to_owned());
+    }
     settings.onboarding_complete = true;
-    settings.onboarding_stage = 2;
+    settings.onboarding_stage = 3;
     write_settings(&app, &settings)
-}
-
-#[tauri::command]
-fn complete_onboarding(app: AppHandle, token: Option<String>) -> Result<(), String> {
-    let mut settings = read_settings(&app)?;
-    apply_onboarding_choice(&mut settings, token)?;
-    // The key and completion flag are persisted together; the UI closes only on success.
-    write_settings(&app, &settings)
-}
-
-fn apply_onboarding_choice(settings: &mut Settings, token: Option<String>) -> Result<(), String> {
-    apply_onboarding_token(settings, token)?;
-    settings.onboarding_complete = true;
-    settings.onboarding_stage = 2;
-    Ok(())
 }
 
 #[tauri::command]
@@ -363,7 +364,6 @@ pub fn run() {
             get_onboarding_stage,
             save_onboarding_token,
             finish_onboarding,
-            complete_onboarding,
             open_civitai_site,
             get_webui_arguments,
             save_webui_arguments,
@@ -406,7 +406,7 @@ fn configure_webview2() {
 
 #[cfg(test)]
 mod onboarding_tests {
-    use super::{apply_onboarding_choice, apply_onboarding_token, Settings};
+    use super::{apply_onboarding_token, pending_onboarding_stage, Settings};
 
     #[test]
     fn api_key_step_does_not_finish_onboarding() {
@@ -418,22 +418,26 @@ mod onboarding_tests {
     }
 
     #[test]
-    fn skip_and_save_complete_onboarding() {
+    fn skipping_key_waits_for_installation() {
         let mut skipped = Settings::default();
-        apply_onboarding_choice(&mut skipped, None).unwrap();
-        assert!(skipped.onboarding_complete);
+        apply_onboarding_token(&mut skipped, None).unwrap();
+        assert_eq!(skipped.onboarding_stage, 1);
+        assert!(!skipped.onboarding_complete);
         assert!(skipped.civitai_token.is_empty());
+    }
 
-        let mut saved = Settings::default();
-        apply_onboarding_choice(&mut saved, Some("  sample-key  ".to_owned())).unwrap();
-        assert!(saved.onboarding_complete);
-        assert_eq!(saved.civitai_token, "sample-key");
+    #[test]
+    fn model_step_requires_completed_webui_installation() {
+        assert_eq!(pending_onboarding_stage(0, true), 0);
+        assert_eq!(pending_onboarding_stage(1, false), 1);
+        assert_eq!(pending_onboarding_stage(1, true), 2);
+        assert_eq!(pending_onboarding_stage(2, false), 1);
     }
 
     #[test]
     fn invalid_key_does_not_complete_onboarding() {
         let mut settings = Settings::default();
-        assert!(apply_onboarding_choice(&mut settings, Some("  ".to_owned())).is_err());
+        assert!(apply_onboarding_token(&mut settings, Some("  ".to_owned())).is_err());
         assert!(!settings.onboarding_complete);
     }
 }

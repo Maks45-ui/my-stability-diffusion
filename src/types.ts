@@ -106,7 +106,6 @@ export interface FlowAPI {
   getPreview(url: string): Promise<string>;
   saveCivitaiToken(token: string): Promise<void>;
   getOnboardingComplete(): Promise<boolean>;
-  completeOnboarding(token: string | null): Promise<void>;
   getOnboardingStage(): Promise<number>;
   saveOnboardingToken(token: string | null): Promise<void>;
   finishOnboarding(): Promise<void>;

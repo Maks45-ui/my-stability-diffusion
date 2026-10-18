@@ -84,6 +84,12 @@
         </section>
       </div>
       <div class="toast glass-surface" id="toast" role="status" aria-live="polite"></div>
+      <section class="glass-surface console-panel" id="console-panel" role="region" aria-labelledby="console-title" aria-hidden="true" inert>
+        <div class="console-heading"><div><span class="eyebrow">ПРОЦЕССЫ FLOW</span><h2 id="console-title">Консоль установки и запуска</h2></div><div class="console-actions"><span class="console-status" id="console-status" data-state="idle">Ожидание</span><button class="icon-button console-close" id="close-terminal" type="button" aria-label="Скрыть консоль" title="Скрыть консоль">×</button></div></div>
+        <pre class="log-output console-output" id="terminal-log" role="log" aria-live="polite">Логи установки и запуска WebUI появятся здесь.
+</pre>
+        <div class="console-footer"><span>Консоль можно скрыть — процесс продолжится.</span><div class="console-footer-actions"><button class="secondary-button console-clear" id="clear-terminal" type="button">Очистить</button><button class="secondary-button console-cancel" id="cancel-terminal-install" type="button" hidden>Отменить установку</button></div></div>
+      </section>
     </main>
   </div>
 
@@ -125,13 +131,6 @@
       <div class="first-run-actions"><button id="first-run-model-skip" class="secondary-button" type="button">Пропустить и начать работу</button></div>
     </section>
   </dialog>
-
-  <section class="glass-surface console-panel" id="console-panel" role="region" aria-labelledby="console-title" aria-hidden="true" inert>
-    <div class="console-heading"><div><span class="eyebrow">ПРОЦЕССЫ FLOW</span><h2 id="console-title">Консоль установки и запуска</h2></div><div class="console-actions"><span class="console-status" id="console-status" data-state="idle">Ожидание</span><button class="icon-button console-close" id="close-terminal" type="button" aria-label="Скрыть консоль" title="Скрыть консоль">×</button></div></div>
-    <pre class="log-output console-output" id="terminal-log" role="log" aria-live="polite">Логи установки и запуска WebUI появятся здесь.
-</pre>
-    <div class="console-footer"><span>Консоль можно скрыть — процесс продолжится.</span><div class="console-footer-actions"><button class="secondary-button console-clear" id="clear-terminal" type="button">Очистить</button><button class="secondary-button console-cancel" id="cancel-terminal-install" type="button" hidden>Отменить установку</button></div></div>
-  </section>
 
   <dialog class="modal glass-surface" id="install-dialog"><div class="modal-header"><div><span class="eyebrow">УСТАНОВКА ПАКЕТА</span><h2>AUTOMATIC1111 WebUI</h2></div><button class="icon-button" id="close-install" aria-label="Закрыть">×</button></div><p>Flow проверит Git и Python 3.10, загрузит WebUI и создаст отдельное окружение. Логи откроются при запуске установки.</p><div class="install-location"><label for="install-dir-dialog">Папка установки</label><div class="path-control"><input id="install-dir-dialog" type="text" readonly placeholder="Выберите папку" /><button id="browse-install-dialog" class="secondary-button" type="button">Обзор...</button></div><small>Пакет будет установлен в подпапку sd-webui.</small></div><div class="modal-actions"><button class="secondary-button" id="cancel-install">Отменить</button><button class="primary-button" id="start-install">Начать установку</button></div></dialog>
   <dialog class="modal glass-surface webui-settings-modal" id="webui-settings-dialog" aria-labelledby="webui-settings-title">

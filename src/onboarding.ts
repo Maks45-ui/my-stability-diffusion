@@ -5,16 +5,16 @@ type StarterKey = "indigo" | "wai" | "realistic";
 
 function required<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
-  if (!node) throw new Error(`Элемент ${id} не найден.`);
+  if (!node) throw new Error(`������� ${id} �� ������.`);
   return node as T;
 }
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
-  return typeof error === "string" ? error : "Не удалось выполнить действие.";
+  return typeof error === "string" ? error : "�� ������� ��������� ��������.";
 }
 
-/** Keeps the main page inaccessible until both first-run steps are complete. */
+/** The model step becomes available only after WebUI has been installed. */
 export class FirstRunController {
   private readonly dialog = required<HTMLDialogElement>("first-run-dialog");
   private readonly title = required<HTMLElement>("first-run-title");
@@ -39,7 +39,8 @@ export class FirstRunController {
     private readonly api: FlowAPI,
     private readonly app: HTMLElement,
     private readonly enqueue: (file: ModelFile, type: string, name: string) => string | null,
-    private readonly onComplete: () => void
+    private readonly onComplete: () => void,
+    private readonly onAwaitInstallation: () => void
   ) {
     this.form.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -69,10 +70,10 @@ export class FirstRunController {
       .catch((error: unknown) => ({ stage: 0, error: errorMessage(error) }));
     await startSplashScreen();
     const result = await status;
-    if (result.stage >= 2) { this.app.inert = false; return; }
+    if (result.stage >= 3 || result.stage === 1) { this.app.inert = false; return; }
     this.dialog.showModal();
-    if (result.stage === 1) this.showModelStep();
-    if (result.error) this.showError(`Не удалось проверить первый запуск: ${result.error}`);
+    if (result.stage === 2) this.showModelStep();
+    if (result.error) this.showError(`�� ������� ��������� ������ ������: ${result.error}`);
     if (result.stage === 0) this.input.focus();
   }
 
@@ -89,26 +90,36 @@ export class FirstRunController {
       if (percent) percent.textContent = `${event.percent}%`;
     }
     if (status && event.phase === "dependencies") {
-      const speed = event.bytesPerSecond ? ` · ${(event.bytesPerSecond / 1048576).toFixed(1)} МБ/с` : "";
-      status.textContent = `Скачивается${speed}`;
+      const speed = event.bytesPerSecond ? ` � ${(event.bytesPerSecond / 1048576).toFixed(1)} ��/�` : "";
+      status.textContent = `�����������${speed}`;
     }
     if (event.phase === "done") {
-      if (status) status.textContent = "Модель загружена. Открываем Flow…";
+      if (status) status.textContent = "������ ���������. ��������� Flow�";
       this.activeTaskId = null;
       void this.finish();
     } else if (["error", "cancelled", "paused"].includes(event.phase)) {
-      if (status) status.textContent = event.phase === "paused" ? "Загрузка приостановлена. Продолжите в каталоге." : event.message;
+      if (status) status.textContent = event.phase === "paused" ? "�������� ��������������. ���������� � ��������." : event.message;
       this.activeTaskId = null;
-      this.modelError.textContent = "Можно выбрать другую модель или начать работу без загрузки.";
+      this.modelError.textContent = "����� ������� ������ ������ ��� ������ ������ ��� ��������.";
       this.enableModelButtons(true);
     }
+  }
+
+  async onInstallComplete(): Promise<void> {
+    // The installer writes its completion marker before emitting the done event.
+    // Recheck the persisted stage so interrupted installs never unlock models.
+    const stage = await this.api.getOnboardingStage();
+    if (stage !== 2 || this.dialog.open) return;
+    this.app.inert = true;
+    this.dialog.showModal();
+    this.showModelStep();
   }
 
   private cards(): HTMLElement[] { return [...document.querySelectorAll<HTMLElement>(".first-run-model-card")]; }
 
   private card(key: StarterKey): HTMLElement {
     const card = this.cards().find((item) => item.dataset.starter === key);
-    if (!card) throw new Error(`Карточка ${key} не найдена.`);
+    if (!card) throw new Error(`�������� ${key} �� �������.`);
     return card;
   }
 
@@ -120,7 +131,7 @@ export class FirstRunController {
   private async saveKey(token: string | null): Promise<void> {
     if (this.busy) return;
     if (token !== null && token.length === 0) {
-      this.showError("Введите API-ключ или нажмите «Пропустить».");
+      this.showError("������� API-���� ��� ������� ������������.");
       this.input.focus();
       return;
     }
@@ -129,11 +140,16 @@ export class FirstRunController {
     this.skip.disabled = true;
     this.input.disabled = true;
     this.status.classList.remove("error");
-    this.status.textContent = "Сохранение…";
+    this.status.textContent = "����������";
     try {
       await this.api.saveOnboardingToken(token);
       this.input.value = "";
-      this.showModelStep();
+      if (await this.api.getOnboardingStage() === 2) this.showModelStep();
+      else {
+        this.dialog.close();
+        this.app.inert = false;
+        this.onAwaitInstallation();
+      }
     } catch (error) {
       this.showError(errorMessage(error));
     } finally {
@@ -145,8 +161,8 @@ export class FirstRunController {
   }
 
   private showModelStep(): void {
-    this.title.textContent = "Выберите первую модель";
-    this.intro.textContent = "Выберите одну модель для папки WebUI. Этот шаг можно пропустить и скачать модель позже.";
+    this.title.textContent = "�������� ������ ������";
+    this.intro.textContent = "�������� ���� ������ ��� ����� WebUI. ���� ��� ����� ���������� � ������� ������ �����.";
     this.keyStep.hidden = true;
     this.modelStep.hidden = false;
     this.dialog.classList.add("first-run-dialog-models");
@@ -161,13 +177,13 @@ export class FirstRunController {
     const card = this.card(key);
     const status = card.querySelector<HTMLElement>(".first-run-model-status");
     const button = card.querySelector<HTMLButtonElement>(".first-run-download");
-    if (status) status.textContent = "Загружаем сведения о модели…";
+    if (status) status.textContent = "��������� �������� � ������";
     if (button) button.disabled = true;
     try {
       const model = await this.api.getStarterModel(key);
       this.models.set(key, model);
       if (status) status.textContent = model.file.name;
-      if (button) { button.disabled = this.activeTaskId !== null; button.textContent = "Скачать"; }
+      if (button) { button.disabled = this.activeTaskId !== null; button.textContent = "�������"; }
       if (model.previewUrl) {
         const image = card.querySelector<HTMLImageElement>(".first-run-model-preview img");
         const fallback = card.querySelector<HTMLElement>(".first-run-model-preview span");
@@ -177,8 +193,8 @@ export class FirstRunController {
         }).catch(() => { /* A preview failure does not block the download. */ });
       }
     } catch (error) {
-      if (status) status.textContent = `Не удалось получить файл: ${errorMessage(error)}`;
-      if (button) { button.disabled = false; button.textContent = "Повторить"; }
+      if (status) status.textContent = `�� ������� �������� ����: ${errorMessage(error)}`;
+      if (button) { button.disabled = false; button.textContent = "���������"; }
     }
   }
 
@@ -198,16 +214,16 @@ export class FirstRunController {
     const name = card.querySelector("h3")?.textContent ?? model.file.name;
     const taskId = this.enqueue(model.file, "Checkpoint", name);
     if (!taskId) {
-      this.modelError.textContent = "Эта модель уже есть в списке загрузок. Откройте каталог после завершения мастера.";
+      this.modelError.textContent = "��� ������ ��� ���� � ������ ��������. �������� ������� ����� ���������� �������.";
       return;
     }
     this.activeTaskId = taskId;
     this.activeKey = key;
-    this.modelError.textContent = "Загрузка идёт в папку sd-webui/models/Stable-diffusion. Можно начать работу, пока она продолжается.";
+    this.modelError.textContent = "�������� ��� � ����� sd-webui/models/Stable-diffusion. ����� ������ ������, ���� ��� ������������.";
     const progress = card.querySelector<HTMLElement>(".first-run-model-progress");
     const status = card.querySelector<HTMLElement>(".first-run-model-status");
     if (progress) progress.hidden = false;
-    if (status) status.textContent = "Ожидает начала загрузки…";
+    if (status) status.textContent = "������� ������ ��������";
     this.enableModelButtons(false);
   }
 
@@ -215,7 +231,7 @@ export class FirstRunController {
     if (this.busy) return;
     this.busy = true;
     this.modelSkip.disabled = true;
-    this.modelError.textContent = "Завершаем настройку…";
+    this.modelError.textContent = "��������� ���������";
     try {
       await this.api.finishOnboarding();
       this.dialog.classList.add("first-run-closing");

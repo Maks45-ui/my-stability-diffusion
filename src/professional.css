@@ -204,7 +204,7 @@ button:active:not(:disabled) { transform: translateY(1px) !important; }
 .webui-arg-chip { border-color: var(--border-subtle); background: var(--surface); box-shadow: none; animation: none; }
 .webui-quick-arg:hover { transform: none; }
 .webui-quick-arg[aria-pressed="true"] { border-color: var(--accent); }
-.console-panel.glass-surface { padding: 17px; border-color: var(--border-subtle); background: var(--panel); box-shadow: 0 16px 40px rgba(0, 0, 0, .22); transform: translateY(8px); transition: opacity .18s ease-out, visibility .18s ease-out, transform .18s ease-out; }
+.console-panel.glass-surface { padding: 17px; border-color: var(--border-subtle); background: var(--panel); box-shadow: none; transform: translateY(8px); transition: opacity .18s ease-out, visibility .18s ease-out, transform .18s ease-out; }
 .console-panel.glass-surface.visible { transform: translateY(0); }
 .console-heading h2 { font-size: 14px; }
 .console-status::before { width: 6px; height: 6px; box-shadow: none; }
