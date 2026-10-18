@@ -70,7 +70,7 @@ let webuiDraft: string[] = [];
 let webuiSettingsRequest = 0;
 let webuiSettingsReady = false;
 let webuiSettingsDirty = false;
-const attentionFlags = new Set(["--xformers", "--opt-sub-quad-attention", "--opt-sdp-attention"]);
+const attentionFlags = new Set(["--xformers", "--opt-sub-quad-attention", "--opt-sdp-attention", "--opt-sdp-no-mem-attention"]);
 const vramFlags = new Set(["--lowvram", "--medvram", "--medvram-sdxl"]);
 const pendingLogs = new Map<HTMLElement, string>();
 
@@ -674,7 +674,7 @@ document.querySelectorAll<HTMLButtonElement>(".webui-quick-arg").forEach((button
 function applyMemoryPreset(vramFlag: "--lowvram" | "--medvram-sdxl", label: string): void {
   if (!webuiSettingsReady) return;
   webuiDraft = webuiDraft.filter((item) => !attentionFlags.has(webuiArgumentName(item)) && !vramFlags.has(webuiArgumentName(item)));
-  webuiDraft.push(vramFlag, "--opt-sub-quad-attention");
+  webuiDraft.push(vramFlag, vramFlag === "--lowvram" ? "--opt-sdp-no-mem-attention" : "--opt-sub-quad-attention");
   sdxlMemoryProfile.checked = true;
   webuiSettingsDirty = true;
   renderWebuiArguments();

@@ -380,7 +380,9 @@ fn apply_memory_flags(arguments: &mut Vec<String>, memory_profile: bool, vram_mi
     if !has_vram_flag {
         arguments.push(if low_vram { "--lowvram" } else { "--medvram-sdxl" }.to_owned());
     }
-    if !has_attention_flag { arguments.push("--opt-sub-quad-attention".to_owned()); }
+    if !has_attention_flag {
+        arguments.push(if low_vram { "--opt-sdp-no-mem-attention" } else { "--opt-sub-quad-attention" }.to_owned());
+    }
     true
 }
 
@@ -875,7 +877,7 @@ mod tests {
     fn four_gib_gpu_gets_lowvram_and_attention_once() {
         let mut arguments = vec!["--api".to_owned()];
         assert!(apply_memory_flags(&mut arguments, false, Some(4096)));
-        assert_eq!(arguments.iter().map(String::as_str).collect::<Vec<_>>(), ["--api", "--lowvram", "--opt-sub-quad-attention"]);
+        assert_eq!(arguments.iter().map(String::as_str).collect::<Vec<_>>(), ["--api", "--lowvram", "--opt-sdp-no-mem-attention"]);
         assert!(apply_memory_flags(&mut arguments, false, Some(4096)));
         assert_eq!(arguments.len(), 3);
     }
