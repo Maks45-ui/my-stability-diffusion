@@ -39,6 +39,7 @@ class SafeSwitchTests(unittest.TestCase):
         modules.sd_hijack = types.SimpleNamespace(model_hijack=types.SimpleNamespace(undo_hijack=lambda model: calls.append("unhijack")))
         modules.sd_unet = types.SimpleNamespace(apply_unet=lambda name: calls.append("unet"))
         modules.sd_vae = types.SimpleNamespace(base_vae=object(), loaded_vae_file="old", checkpoint_info=object())
+        modules.shared = types.SimpleNamespace(weight_load_location=None)
 
         with patch.dict(os.environ, {"FLOW_SAFE_MODEL_SWITCH": "1"}), patch.dict(sys.modules, {"modules": modules}):
             runpy.run_path(str(SCRIPT))
@@ -46,6 +47,7 @@ class SafeSwitchTests(unittest.TestCase):
             self.assertEqual(wrapped(), "loaded")
             self.assertEqual(calls, ["unet", "cpu", "unhijack", "trash", "gc", "reload"])
             self.assertIsNone(modules.sd_vae.base_vae)
+            self.assertEqual(modules.shared.weight_load_location, "cpu")
 
             # UI script reloads must not stack multiple wrappers.
             runpy.run_path(str(SCRIPT))
@@ -86,6 +88,7 @@ class SafeSwitchTests(unittest.TestCase):
         modules.sd_hijack = types.SimpleNamespace(model_hijack=types.SimpleNamespace(undo_hijack=lambda model: None))
         modules.sd_unet = types.SimpleNamespace(apply_unet=lambda name: None)
         modules.sd_vae = types.SimpleNamespace(base_vae=None, loaded_vae_file=None, checkpoint_info=None)
+        modules.shared = types.SimpleNamespace(weight_load_location=None)
 
         with patch.dict(os.environ, {"FLOW_SAFE_MODEL_SWITCH": "1"}), patch.dict(sys.modules, {"modules": modules}):
             runpy.run_path(str(SCRIPT))

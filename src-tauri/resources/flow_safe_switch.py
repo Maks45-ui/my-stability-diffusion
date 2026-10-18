@@ -1,7 +1,7 @@
 """Flow's optional low-memory checkpoint switch for AUTOMATIC1111.
 
 Loaded as a WebUI extension. The launcher enables it only for Flow's SDXL
-memory profile (or an automatically detected 4–5 GB NVIDIA GPU).
+memory profile (or an automatically detected 4–6 GB NVIDIA GPU).
 """
 
 import gc
@@ -10,7 +10,12 @@ from functools import wraps
 
 
 if os.environ.get("FLOW_SAFE_MODEL_SWITCH") == "1":
-    from modules import devices, sd_hijack, sd_models, sd_unet, sd_vae
+    from modules import devices, sd_hijack, sd_models, sd_unet, sd_vae, shared
+
+    # A1111 otherwise reads .safetensors directly onto the selected device.
+    # On a 4 GB GPU, stage checkpoint tensors in system RAM first and let
+    # A1111's lowvram path move only the required parts to CUDA.
+    shared.weight_load_location = "cpu"
 
     original_reload = sd_models.reload_model_weights
     if not getattr(original_reload, "_flow_safe_switch", False):

@@ -374,7 +374,8 @@ fn nvidia_vram_mib() -> Option<u64> {
 
 fn apply_memory_flags(arguments: &mut Vec<String>, memory_profile: bool, vram_mib: Option<u64>) -> bool {
     let low_vram = vram_mib.is_some_and(|mib| mib <= 5_120);
-    if !memory_profile && !low_vram { return false; }
+    let constrained_vram = vram_mib.is_some_and(|mib| mib <= 6_144);
+    if !memory_profile && !constrained_vram { return false; }
     let has_vram_flag = arguments.iter().any(|argument| matches!(argument.as_str(), "--lowvram" | "--medvram" | "--medvram-sdxl"));
     let has_attention_flag = arguments.iter().any(|argument| matches!(argument.as_str(), "--xformers" | "--opt-sub-quad-attention" | "--opt-sdp-attention" | "--opt-sdp-no-mem-attention"));
     if !has_vram_flag {
@@ -393,6 +394,12 @@ fn update_sdxl_memory_config(config: &mut serde_json::Value) -> Result<(), Strin
     options.insert("sd_checkpoints_keep_in_cpu".to_owned(), json!(true));
     options.insert("sd_checkpoint_cache".to_owned(), json!(0));
     options.insert("sd_vae_checkpoint_cache".to_owned(), json!(0));
+    // A1111's non-mmap branch reads the safetensors bytes directly. This
+    // avoids a Windows native access violation seen while mapping the WAI
+    // Illustrious SDXL checkpoint in safetensors/torch storage.
+    if cfg!(windows) {
+        options.insert("disable_mmap_load_safetensors".to_owned(), json!(true));
+    }
     Ok(())
 }
 
@@ -784,7 +791,9 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, inst
     }
     if memory_profile {
         notify_kind(&app, "launch", "log", format!("Флаги памяти и attention: {}", arguments.iter().filter(|arg| arg.starts_with("--lowvram") || arg.starts_with("--medvram") || arg.starts_with("--opt-") || arg.as_str() == "--xformers").cloned().collect::<Vec<_>>().join(" ")));
-        notify_kind(&app, "launch", "log", "Безопасная выгрузка предыдущего чекпоинта включена.");
+        notify_kind(&app, "launch", "log", "Веса загружаются через RAM; безопасная выгрузка предыдущего чекпоинта включена.");
+        #[cfg(windows)]
+        notify_kind(&app, "launch", "log", "Чтение safetensors через mmap отключено для защиты от сбоя Windows 0xC0000005.");
     }
     notify_kind(&app, "launch", "log", format!("Журналы WebUI: stdout — {}; stderr — {}", log_path.display(), stderr_path.display()));
     let control = (*webui).clone();
@@ -883,6 +892,13 @@ mod tests {
     }
 
     #[test]
+    fn six_gib_gpu_stages_sdxl_weights_in_ram() {
+        let mut arguments = vec!["--api".to_owned()];
+        assert!(apply_memory_flags(&mut arguments, false, Some(6144)));
+        assert_eq!(arguments.iter().map(String::as_str).collect::<Vec<_>>(), ["--api", "--medvram-sdxl", "--opt-sub-quad-attention"]);
+    }
+
+    #[test]
     fn chosen_memory_flags_are_respected() {
         let mut arguments = vec!["--medvram-sdxl".to_owned(), "--xformers".to_owned()];
         assert!(apply_memory_flags(&mut arguments, true, None));
@@ -914,5 +930,8 @@ mod tests {
         assert_eq!(config["sd_checkpoints_limit"], 1);
         assert_eq!(config["sd_checkpoint_cache"], 0);
         assert_eq!(config["sd_vae_checkpoint_cache"], 0);
+        if cfg!(windows) {
+            assert_eq!(config["disable_mmap_load_safetensors"], true);
+        }
     }
 }
