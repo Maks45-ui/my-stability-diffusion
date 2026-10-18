@@ -10,6 +10,34 @@ import os
 from functools import wraps
 
 
+def _windows_commit_status():
+    """Return available/total system commit in GiB, when Windows reports it."""
+    if os.name != "nt":
+        return None
+
+    import ctypes
+
+    class MemoryStatus(ctypes.Structure):
+        _fields_ = [
+            ("length", ctypes.c_ulong),
+            ("memory_load", ctypes.c_ulong),
+            ("total_physical", ctypes.c_ulonglong),
+            ("available_physical", ctypes.c_ulonglong),
+            ("total_page_file", ctypes.c_ulonglong),
+            ("available_page_file", ctypes.c_ulonglong),
+            ("total_virtual", ctypes.c_ulonglong),
+            ("available_virtual", ctypes.c_ulonglong),
+            ("available_extended_virtual", ctypes.c_ulonglong),
+        ]
+
+    status = MemoryStatus()
+    status.length = ctypes.sizeof(status)
+    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+        return None
+    gib = 1024 ** 3
+    return status.available_page_file / gib, status.total_page_file / gib
+
+
 if os.environ.get("FLOW_SAFE_MODEL_SWITCH") == "1":
     import safetensors.torch
     from modules import devices, sd_hijack, sd_models, sd_unet, sd_vae, shared
@@ -25,7 +53,18 @@ if os.environ.get("FLOW_SAFE_MODEL_SWITCH") == "1":
                 # Unlike A1111's disable-mmap setting, pread does not first
                 # allocate a single byte buffer for the entire checkpoint.
                 kwargs["backend"] = "pread"
-                return original_load_file(filename, device=device, **kwargs)
+                commit = _windows_commit_status()
+                if commit is not None:
+                    print(f"[Flow] Windows available commit before checkpoint load: {commit[0]:.1f} / {commit[1]:.1f} GiB.", flush=True)
+                try:
+                    return original_load_file(filename, device=device, **kwargs)
+                except OSError as error:
+                    if getattr(error, "winerror", None) == 1455 or "os error 1455" in str(error).lower():
+                        commit = _windows_commit_status()
+                        if commit is not None:
+                            print(f"[Flow] Windows available commit after error 1455: {commit[0]:.1f} / {commit[1]:.1f} GiB.", flush=True)
+                        print("[Flow] The Windows system commit limit was reached while loading this checkpoint. Check the Memory > Committed value in Task Manager and increase the Windows page file if needed.", flush=True)
+                    raise
 
             flow_load_file._flow_pread = True
             safetensors.torch.load_file = flow_load_file
@@ -51,6 +90,9 @@ if os.environ.get("FLOW_SAFE_MODEL_SWITCH") == "1":
                 target = info or sd_models.select_checkpoint()
                 if current is not None and current.sd_checkpoint_info.filename != target.filename:
                     print("[Flow] Unloading previous checkpoint before loading the next one...", flush=True)
+                    commit = _windows_commit_status()
+                    if commit is not None:
+                        print(f"[Flow] Windows available commit before unloading: {commit[0]:.1f} / {commit[1]:.1f} GiB.", flush=True)
 
                     # Clear live references first: empty_cache alone cannot release
                     # tensors that are still owned by the old checkpoint.
@@ -74,6 +116,9 @@ if os.environ.get("FLOW_SAFE_MODEL_SWITCH") == "1":
                     gc.collect()
                     devices.torch_gc()  # CUDA: torch.cuda.empty_cache() + ipc_collect().
                     print("[Flow] CUDA cache cleared; loading the next checkpoint.", flush=True)
+                    commit = _windows_commit_status()
+                    if commit is not None:
+                        print(f"[Flow] Windows available commit after unloading: {commit[0]:.1f} / {commit[1]:.1f} GiB.", flush=True)
 
                 return original_reload(sd_model, info, forced_reload)
 

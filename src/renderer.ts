@@ -611,6 +611,10 @@ function onTask(event: TaskEvent): void {
     return;
   }
   if (event.kind === "launch") {
+    if (event.phase === "model_error") {
+      setConsoleStatus("Модель не загрузилась", "error");
+      notify(event.message);
+    }
     if (event.phase === "starting") {
       webuiRunning = true;
       updateConsoleControls();

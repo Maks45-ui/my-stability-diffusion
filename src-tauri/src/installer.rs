@@ -267,6 +267,14 @@ fn emit_webui_line(app: &AppHandle, control: &WebuiControl, line: &[u8], source:
     } else {
         emit_pipe_line(app, "launch", "log", line, None, Some(control));
     }
+    if source == "stderr" && is_windows_commit_error(&String::from_utf8_lossy(line)) {
+        notify_kind(app, "launch", "model_error", "Windows не смогла выделить память для загрузки модели (ошибка 1455). WebUI продолжает работать, но эта модель не загрузилась. Проверьте «Выделено» в Диспетчере задач → Производительность → Память; при достижении лимита увеличьте файл подкачки Windows и убедитесь, что на диске есть свободное место.");
+    }
+}
+
+fn is_windows_commit_error(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    lower.contains("os error 1455") || lower.contains("winerror 1455")
 }
 
 fn tail_webui_log(app: AppHandle, mut reader: fs::File, control: WebuiControl, source: &'static str) -> thread::JoinHandle<()> {
@@ -914,7 +922,14 @@ pub(crate) fn open_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) -> Res
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_memory_flags, flow_requirements_content, parse_webui_arguments, parse_webui_ready_url, update_sdxl_memory_config};
+    use super::{apply_memory_flags, flow_requirements_content, is_windows_commit_error, parse_webui_arguments, parse_webui_ready_url, update_sdxl_memory_config};
+
+    #[test]
+    fn recognizes_page_file_failure_without_confusing_other_errors() {
+        assert!(is_windows_commit_error("OSError: The paging file is too small for this operation to complete. (os error 1455)"));
+        assert!(is_windows_commit_error("[WinError 1455]"));
+        assert!(!is_windows_commit_error("Windows fatal exception: access violation"));
+    }
 
     #[test]
     fn flow_requirements_preserve_webui_pins_except_safetensors() {
