@@ -13,6 +13,21 @@ from unittest.mock import patch
 SCRIPT = Path(__file__).resolve().parents[1] / "src-tauri/resources/flow_safe_switch.py"
 
 
+def fake_safetensors():
+    package = types.ModuleType("safetensors")
+    package.__path__ = []
+    torch_module = types.ModuleType("safetensors.torch")
+    calls = []
+
+    def load_file(filename, device="cpu", *, backend="mmap"):
+        calls.append((filename, device, backend))
+        return {}
+
+    torch_module.load_file = load_file
+    package.torch = torch_module
+    return package, torch_module, calls
+
+
 class SafeSwitchTests(unittest.TestCase):
     def test_old_model_is_evicted_before_loading_the_new_one(self):
         calls = []
@@ -40,14 +55,18 @@ class SafeSwitchTests(unittest.TestCase):
         modules.sd_unet = types.SimpleNamespace(apply_unet=lambda name: calls.append("unet"))
         modules.sd_vae = types.SimpleNamespace(base_vae=object(), loaded_vae_file="old", checkpoint_info=object())
         modules.shared = types.SimpleNamespace(weight_load_location=None)
+        safe_package, safe_torch, safe_calls = fake_safetensors()
 
-        with patch.dict(os.environ, {"FLOW_SAFE_MODEL_SWITCH": "1"}), patch.dict(sys.modules, {"modules": modules}):
+        with patch.dict(os.environ, {"FLOW_SAFE_MODEL_SWITCH": "1"}), patch.dict(sys.modules, {"modules": modules, "safetensors": safe_package, "safetensors.torch": safe_torch}):
             runpy.run_path(str(SCRIPT))
             wrapped = modules.sd_models.reload_model_weights
             self.assertEqual(wrapped(), "loaded")
             self.assertEqual(calls, ["unet", "cpu", "unhijack", "trash", "gc", "reload"])
             self.assertIsNone(modules.sd_vae.base_vae)
             self.assertEqual(modules.shared.weight_load_location, "cpu")
+            if os.name == "nt":
+                safe_torch.load_file("checkpoint.safetensors", device="cpu")
+                self.assertEqual(safe_calls, [("checkpoint.safetensors", "cpu", "pread")])
 
             # UI script reloads must not stack multiple wrappers.
             runpy.run_path(str(SCRIPT))
@@ -89,8 +108,9 @@ class SafeSwitchTests(unittest.TestCase):
         modules.sd_unet = types.SimpleNamespace(apply_unet=lambda name: None)
         modules.sd_vae = types.SimpleNamespace(base_vae=None, loaded_vae_file=None, checkpoint_info=None)
         modules.shared = types.SimpleNamespace(weight_load_location=None)
+        safe_package, safe_torch, _ = fake_safetensors()
 
-        with patch.dict(os.environ, {"FLOW_SAFE_MODEL_SWITCH": "1"}), patch.dict(sys.modules, {"modules": modules}):
+        with patch.dict(os.environ, {"FLOW_SAFE_MODEL_SWITCH": "1"}), patch.dict(sys.modules, {"modules": modules, "safetensors": safe_package, "safetensors.torch": safe_torch}):
             runpy.run_path(str(SCRIPT))
             loader = threading.Thread(target=initial_load)
             loader.start()

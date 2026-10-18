@@ -312,6 +312,8 @@ fn run_logged_kind(app: &AppHandle, control: &InstallControl, kind: &'static str
         .env("WEBUI_LAUNCH_LIVE_OUTPUT", "1")
         .env("STABLE_DIFFUSION_REPO", SD_REPO)
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let requirements = cwd.join(".flow-requirements.txt");
+    if requirements.is_file() { command.env("REQS_FILE", requirements); }
     use_local_clip_sources(&mut command, cwd);
     hide_console(&mut command);
     let mut child = command.spawn().map_err(|error| format!("Не удалось запустить {program}: {error}"))?;
@@ -340,6 +342,34 @@ fn run_logged(app: &AppHandle, control: &InstallControl, program: &str, args: &[
 
 const SDXL_ALLOC_CONF: &str = "backend:native,garbage_collection_threshold:0.6,max_split_size_mb:128";
 const FLOW_SAFE_SWITCH: &str = include_str!("../resources/flow_safe_switch.py");
+const FLOW_SAFETENSORS: &str = "safetensors==0.8.0";
+
+fn flow_requirements_content(source: &str) -> String {
+    let mut lines = Vec::new();
+    let mut replaced = false;
+    for line in source.lines() {
+        if line.trim_start().starts_with("safetensors==") {
+            if !replaced { lines.push(FLOW_SAFETENSORS.to_owned()); }
+            replaced = true;
+        } else {
+            lines.push(line.to_owned());
+        }
+    }
+    if !replaced { lines.push(FLOW_SAFETENSORS.to_owned()); }
+    format!("{}\n", lines.join("\n"))
+}
+
+fn flow_requirements(directory: &Path) -> Result<PathBuf, String> {
+    let source = fs::read_to_string(directory.join("requirements_versions.txt"))
+        .map_err(|error| format!("Не удалось прочитать зависимости WebUI: {error}"))?;
+    let content = flow_requirements_content(&source);
+    let destination = directory.join(".flow-requirements.txt");
+    if fs::read_to_string(&destination).ok().as_deref() != Some(content.as_str()) {
+        fs::write(&destination, content)
+            .map_err(|error| format!("Не удалось создать зависимости Flow: {error}"))?;
+    }
+    Ok(destination)
+}
 
 fn ensure_flow_safe_switch_extension(directory: &Path) -> Result<(), String> {
     let script = directory.join("extensions/flow-safe-switch/scripts/flow_safe_switch.py");
@@ -394,11 +424,11 @@ fn update_sdxl_memory_config(config: &mut serde_json::Value) -> Result<(), Strin
     options.insert("sd_checkpoints_keep_in_cpu".to_owned(), json!(true));
     options.insert("sd_checkpoint_cache".to_owned(), json!(0));
     options.insert("sd_vae_checkpoint_cache".to_owned(), json!(0));
-    // A1111's non-mmap branch reads the safetensors bytes directly. This
-    // avoids a Windows native access violation seen while mapping the WAI
-    // Illustrious SDXL checkpoint in safetensors/torch storage.
+    // A1111's disable-mmap branch reads the whole checkpoint into one buffer
+    // and fails with MemoryError on low-RAM systems. The Flow extension uses
+    // safetensors 0.8's streaming pread backend instead.
     if cfg!(windows) {
-        options.insert("disable_mmap_load_safetensors".to_owned(), json!(true));
+        options.insert("disable_mmap_load_safetensors".to_owned(), json!(false));
     }
     Ok(())
 }
@@ -576,7 +606,9 @@ fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(
     if clip_missing { install_local_clip(app, control, &venv_python, &directory, "clip", "clip", CLIP_REPO, CLIP_REVISION)?; }
     if openclip_missing { install_local_clip(app, control, &venv_python, &directory, "open_clip", "open_clip", OPENCLIP_REPO, OPENCLIP_REVISION)?; }
     notify(app, "dependencies", "Установка зависимостей WebUI…");
-    // launch.py installs requirements_versions.txt with WebUI's own torch configuration.
+    flow_requirements(&directory)?;
+    // Keep WebUI's dependency pins except for safetensors, which needs the
+    // streaming pread backend in Flow's low-memory Windows profile.
     run_logged_retry_locked(app, control, &venv_python.to_string_lossy(), &["-u".to_owned(), "launch.py".to_owned(), "--exit".to_owned(), "--skip-torch-cuda-test".to_owned()], &directory)?;
     if control.cancelled.load(Ordering::SeqCst) { return Err("Установка отменена.".to_owned()); }
     if !python_module_installed(&venv_python, "clip")? || !python_module_installed(&venv_python, "open_clip")? {
@@ -703,6 +735,7 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, inst
     let directory = installation_dir(&app)?.join("sd-webui");
     if !directory.join(".flow-installed.json").is_file() { return Err("Сначала установите пакет.".to_owned()); }
     if !directory.join("launch.py").is_file() { return Err("Файл запуска WebUI не найден.".to_owned()); }
+    let requirements = flow_requirements(&directory)?;
     let python = if cfg!(windows) { directory.join("venv/Scripts/python.exe") } else { directory.join("venv/bin/python") };
     if !python.is_file() { return Err("Виртуальное окружение WebUI не найдено.".to_owned()); }
     let mut arguments = parse_webui_arguments(&crate::webui_arguments(&app)?)?;
@@ -721,6 +754,7 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, inst
     command.arg("-u").arg("launch.py").args(&arguments);
     use_local_clip_sources(&mut command, &directory);
     command.current_dir(&directory)
+        .env("REQS_FILE", &requirements)
         .env("PYTHONUNBUFFERED", "1")
         .env("PYTHONIOENCODING", "utf-8:backslashreplace")
         .env("PYTHONFAULTHANDLER", "1")
@@ -793,7 +827,7 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, inst
         notify_kind(&app, "launch", "log", format!("Флаги памяти и attention: {}", arguments.iter().filter(|arg| arg.starts_with("--lowvram") || arg.starts_with("--medvram") || arg.starts_with("--opt-") || arg.as_str() == "--xformers").cloned().collect::<Vec<_>>().join(" ")));
         notify_kind(&app, "launch", "log", "Веса загружаются через RAM; безопасная выгрузка предыдущего чекпоинта включена.");
         #[cfg(windows)]
-        notify_kind(&app, "launch", "log", "Чтение safetensors через mmap отключено для защиты от сбоя Windows 0xC0000005.");
+        notify_kind(&app, "launch", "log", "safetensors: потоковое чтение pread вместо mmap; полный буфер модели не создаётся.");
     }
     notify_kind(&app, "launch", "log", format!("Журналы WebUI: stdout — {}; stderr — {}", log_path.display(), stderr_path.display()));
     let control = (*webui).clone();
@@ -880,7 +914,13 @@ pub(crate) fn open_web_ui(app: AppHandle, webui: State<'_, WebuiControl>) -> Res
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_memory_flags, parse_webui_arguments, parse_webui_ready_url, update_sdxl_memory_config};
+    use super::{apply_memory_flags, flow_requirements_content, parse_webui_arguments, parse_webui_ready_url, update_sdxl_memory_config};
+
+    #[test]
+    fn flow_requirements_preserve_webui_pins_except_safetensors() {
+        let source = "torch\nsafetensors==0.4.2\ngradio==3.41.2\n";
+        assert_eq!(flow_requirements_content(source), "torch\nsafetensors==0.8.0\ngradio==3.41.2\n");
+    }
 
     #[test]
     fn four_gib_gpu_gets_lowvram_and_attention_once() {
@@ -931,7 +971,7 @@ mod tests {
         assert_eq!(config["sd_checkpoint_cache"], 0);
         assert_eq!(config["sd_vae_checkpoint_cache"], 0);
         if cfg!(windows) {
-            assert_eq!(config["disable_mmap_load_safetensors"], true);
+            assert_eq!(config["disable_mmap_load_safetensors"], false);
         }
     }
 }

@@ -5,12 +5,31 @@ memory profile (or an automatically detected 4–6 GB NVIDIA GPU).
 """
 
 import gc
+import inspect
 import os
 from functools import wraps
 
 
 if os.environ.get("FLOW_SAFE_MODEL_SWITCH") == "1":
+    import safetensors.torch
     from modules import devices, sd_hijack, sd_models, sd_unet, sd_vae, shared
+
+    if os.name == "nt":
+        original_load_file = safetensors.torch.load_file
+        if not getattr(original_load_file, "_flow_pread", False):
+            if "backend" not in inspect.signature(original_load_file).parameters:
+                raise RuntimeError("Flow requires safetensors 0.8.0 or newer for streaming SDXL loading.")
+
+            @wraps(original_load_file)
+            def flow_load_file(filename, device="cpu", **kwargs):
+                # Unlike A1111's disable-mmap setting, pread does not first
+                # allocate a single byte buffer for the entire checkpoint.
+                kwargs["backend"] = "pread"
+                return original_load_file(filename, device=device, **kwargs)
+
+            flow_load_file._flow_pread = True
+            safetensors.torch.load_file = flow_load_file
+            print("[Flow] safetensors uses streaming pread instead of mmap.", flush=True)
 
     # A1111 otherwise reads .safetensors directly onto the selected device.
     # On a 4 GB GPU, stage checkpoint tensors in system RAM first and let
