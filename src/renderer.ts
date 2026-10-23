@@ -66,6 +66,7 @@ let stateSequence = 0;
 let debounceTimer: number | undefined;
 let toastTimer: number | undefined;
 let installing = false;
+let installingPackageId: PackageInfo["id"] = "automatic1111";
 let stoppingWebui = false;
 let webuiControlBusy = false;
 let hasWebuiPackage = false;
@@ -263,6 +264,10 @@ function addWebuiArgument(raw: string): boolean {
 async function openWebuiSettings(): Promise<void> {
   const memoryCard = document.querySelector<HTMLElement>(".webui-memory-card");
   if (memoryCard) memoryCard.hidden = activePackageId === "forge-neo";
+  document.querySelectorAll<HTMLButtonElement>(".webui-quick-arg").forEach((button) => {
+    button.hidden = activePackageId === "forge-neo" && button.dataset.argument !== "--xformers"
+      && button.dataset.argument !== "--api" && button.dataset.argument !== "--listen";
+  });
   if (webuiSettingsDialog.open) return;
   webuiSettingsDialog.showModal();
   webuiSettingsReady = false;
@@ -618,9 +623,9 @@ function onTask(event: TaskEvent): void {
       setConsoleStatus(event.phase === "done" ? "Установлено" : event.phase === "cancelled" ? "Отменено" : "Ошибка установки", event.phase === "done" ? "done" : "error");
       setInstalling(false);
       if (event.phase === "done") {
-        notify("WebUI установлен.");
-        void window.flow.selectPackage("automatic1111").then(async () => {
-          activePackageId = "automatic1111";
+        notify(event.message);
+        void window.flow.selectPackage(installingPackageId).then(async () => {
+          activePackageId = installingPackageId;
           await downloadManager.restore();
           await refreshState();
           await firstRun.onInstallComplete();
@@ -712,13 +717,19 @@ element<HTMLButtonElement>("add-package").addEventListener("click", () => {
   else installDialog.showModal();
 });
 installPackageType.addEventListener("change", () => {
-  const forge = installPackageType.value === "forge-neo";
-  element<HTMLElement>("automatic-install-location").hidden = forge;
-  element<HTMLElement>("forge-install-location").hidden = !forge;
-  element<HTMLElement>("install-description").textContent = forge
-    ? "Подключите готовый Forge Neo из Stability Matrix. В Stability Matrix откройте папку установленного пакета через меню «⋮». Перед запуском в Flow остановите этот пакет в Stability Matrix."
-    : "Flow проверит Git и Python 3.10, загрузит WebUI и создаст отдельное окружение. Логи откроются при запуске установки.";
-  element<HTMLButtonElement>("start-install").textContent = forge ? "Подключить Forge Neo" : "Начать установку";
+  const importForge = installPackageType.value === "forge-neo-import";
+  const installForge = installPackageType.value === "forge-neo-install";
+  element<HTMLElement>("automatic-install-location").hidden = importForge;
+  element<HTMLElement>("forge-install-location").hidden = !importForge;
+  element<HTMLElement>("install-subfolder").textContent = installForge
+    ? "Forge Neo будет установлен отдельно в подпапку sd-webui-forge-neo."
+    : "Пакет будет установлен в подпапку sd-webui.";
+  element<HTMLElement>("install-description").textContent = importForge
+    ? "Подключите готовый Forge Neo из Stability Matrix. В Stability Matrix откройте папку пакета через меню «⋮» и остановите его перед запуском в Flow."
+    : installForge
+      ? "Flow скачает ветку Forge Neo, подготовит Python 3.13 в отдельном окружении и установит зависимости. Ход установки появится в консоли."
+      : "Flow проверит Git и Python 3.10, загрузит WebUI и создаст отдельное окружение. Логи откроются при запуске установки.";
+  element<HTMLButtonElement>("start-install").textContent = importForge ? "Подключить Forge Neo" : "Начать установку";
 });
 element<HTMLButtonElement>("browse-forge-dialog").addEventListener("click", async () => {
   try {
@@ -729,7 +740,7 @@ element<HTMLButtonElement>("browse-forge-dialog").addEventListener("click", asyn
 element<HTMLButtonElement>("close-install").addEventListener("click", () => installDialog.close());
 element<HTMLButtonElement>("start-install").addEventListener("click", async () => {
   if (installing) return;
-  if (installPackageType.value === "forge-neo") {
+  if (installPackageType.value === "forge-neo-import") {
     if (!forgeDirInput.value.trim()) { notify("Выберите папку установленного Forge Neo."); return; }
     try {
       await window.flow.registerForgeNeo(forgeDirInput.value);
@@ -743,12 +754,17 @@ element<HTMLButtonElement>("start-install").addEventListener("click", async () =
     return;
   }
   if (!installationDir) { notify("Сначала выберите папку установки."); return; }
+  const forge = installPackageType.value === "forge-neo-install";
+  installingPackageId = forge ? "forge-neo" : "automatic1111";
   setInstalling(true);
   installDialog.close();
   setConsoleVisible(true);
   setConsoleStatus("Установка", "running");
-  queueLog(terminal, "[Установка] Начало установки AUTOMATIC1111 WebUI...");
-  try { await window.flow.installWebUI(installationDir); }
+  queueLog(terminal, `[Установка] Начало установки ${forge ? "Forge Neo" : "AUTOMATIC1111 WebUI"}...`);
+  try {
+    if (forge) await window.flow.installForgeNeo(installationDir);
+    else await window.flow.installWebUI(installationDir);
+  }
   catch (error) {
     setInstalling(false);
     setConsoleStatus("Ошибка установки", "error");

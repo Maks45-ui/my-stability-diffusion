@@ -8,6 +8,7 @@ export const flowApi: FlowAPI = {
   getState: () => invoke<AppState>("get_state"),
   getWebUIStatus: () => invoke<WebUIStatus>("get_webui_status"),
   installWebUI: (installationDir: string) => invoke<void>("install_web_ui", { installationDir }),
+  installForgeNeo: (installationDir: string) => invoke<void>("install_forge_neo_web_ui", { installationDir }),
   cancelInstall: () => invoke<void>("cancel_install"),
   launchWebUI: (packageId?: PackageInfo["id"]) => invoke<void>("launch_web_ui", { packageId }),
   registerForgeNeo: (directory: string) => invoke<void>("register_forge_neo", { directory }),

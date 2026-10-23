@@ -49,6 +49,7 @@ fn webui_job(child: &std::process::Child) -> Result<WindowsJob, String> {
 }
 
 const WEBUI_REPO: &str = "https://github.com/AUTOMATIC1111/stable-diffusion-webui.git";
+const FORGE_NEO_REPO: &str = "https://github.com/Haoming02/sd-webui-forge-classic.git";
 const SD_REPO: &str = "https://github.com/w-e-w/stablediffusion.git";
 const CLIP_REPO: &str = "https://github.com/openai/CLIP.git";
 const CLIP_REVISION: &str = "d50d76daa670286dd6cacf3bcd80b5e4823fc8e1";
@@ -106,7 +107,11 @@ impl WebuiControl {
 }
 
 pub(crate) fn venv_python(directory: &Path) -> PathBuf {
-    if cfg!(windows) { directory.join("venv/Scripts/python.exe") } else { directory.join("venv/bin/python") }
+    python_in_venv(&directory.join("venv"))
+}
+
+fn python_in_venv(venv: &Path) -> PathBuf {
+    if cfg!(windows) { venv.join("Scripts/python.exe") } else { venv.join("bin/python") }
 }
 
 const WEBUI_OPEN_DELAY: Duration = Duration::from_millis(1500);
@@ -183,6 +188,35 @@ fn python_310(app: &AppHandle) -> Result<(String, Vec<String>), String> {
         }
     }
     Err("Не найден Python 3.10. Установите его и перезапустите Flow.".to_owned())
+}
+
+fn uv_for_forge(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<PathBuf, String> {
+    let mut probe = Command::new("uv");
+    probe.arg("--version").stdin(Stdio::null());
+    hide_console(&mut probe);
+    if probe.output().is_ok_and(|output| output.status.success()) {
+        notify(app, "checking", "uv найден; он подготовит Python 3.13 для Forge Neo.");
+        return Ok(PathBuf::from("uv"));
+    }
+
+    // A small, separate bootstrap environment lets uv download Python 3.13
+    // without changing the user's system Python or Stability Matrix package.
+    let tools_dir = parent.join(".flow-tools");
+    let bootstrap = tools_dir.join("uv-bootstrap");
+    let uv = if cfg!(windows) { bootstrap.join("Scripts/uv.exe") } else { bootstrap.join("bin/uv") };
+    if uv.is_file() { return Ok(uv); }
+    notify(app, "checking", "uv не найден; устанавливаю его для подготовки Python 3.13…");
+    let (python, mut prefix) = python_310(app).map_err(|_| "Для автоматической установки Python 3.13 нужен uv или Python 3.10. Установите uv и повторите установку Forge Neo.".to_owned())?;
+    fs::create_dir_all(&tools_dir).map_err(|error| error.to_string())?;
+    prefix.extend(["-m".to_owned(), "venv".to_owned(), bootstrap.to_string_lossy().into_owned()]);
+    let bootstrap_python = python_in_venv(&bootstrap);
+    if !bootstrap_python.is_file() {
+        run_logged(app, control, &python, &prefix, &tools_dir, None)?;
+    }
+    run_logged_retry_locked(app, control, &bootstrap_python.to_string_lossy(),
+        &["-m".to_owned(), "pip".to_owned(), "install".to_owned(), "--upgrade".to_owned(), "uv".to_owned()], &tools_dir)?;
+    if !uv.is_file() { return Err("uv не появился после установки.".to_owned()); }
+    Ok(uv)
 }
 
 fn python_module_installed(python: &Path, module: &str) -> Result<bool, String> {
@@ -634,6 +668,101 @@ fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(
     let version = command_output(app, "git", &["-C".to_owned(), directory.to_string_lossy().into_owned(), "describe".to_owned(), "--tags".to_owned(), "--always".to_owned()]).unwrap_or_else(|_| "Установлен".to_owned());
     fs::write(directory.join(".flow-installed.json"), json!({ "name": "AUTOMATIC1111 WebUI", "version": version }).to_string()).map_err(|error| error.to_string())?;
     notify(app, "done", "AUTOMATIC1111 WebUI установлен.");
+    Ok(())
+}
+
+fn install_forge_neo(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(), String> {
+    notify(app, "checking", "Проверка Git для Forge Neo…");
+    command_output(app, "git", &["--version".to_owned()])
+        .map_err(|_| "Git не найден. Установите Git и перезапустите Flow.".to_owned())?;
+    let directory = parent.join("sd-webui-forge-neo");
+    notify(app, "cloning", format!("Forge Neo будет установлен отдельно: {}", directory.display()));
+    if directory.exists() {
+        if !directory.join(".git").is_dir() {
+            return Err("Папка sd-webui-forge-neo уже занята. Выберите другую папку установки или освободите её.".to_owned());
+        }
+        let path = directory.to_string_lossy().into_owned();
+        let remote = command_output(app, "git", &["-C".to_owned(), path.clone(), "remote".to_owned(), "get-url".to_owned(), "origin".to_owned()])?;
+        if remote.trim_end_matches('/').trim_end_matches(".git").to_lowercase() != FORGE_NEO_REPO.trim_end_matches(".git").to_lowercase() {
+            return Err("В папке sd-webui-forge-neo находится другой Git-репозиторий.".to_owned());
+        }
+        let branch = command_output(app, "git", &["-C".to_owned(), path.clone(), "branch".to_owned(), "--show-current".to_owned()])?;
+        if branch != "neo" { return Err("Существующий Forge-репозиторий находится не на ветке neo.".to_owned()); }
+        if !directory.join("launch.py").is_file() || !directory.join("modules_forge").is_dir() {
+            let changes = command_output(app, "git", &["-C".to_owned(), path, "status".to_owned(), "--porcelain".to_owned()])?;
+            if !changes.is_empty() { return Err("В неполной папке Forge Neo есть локальные изменения. Сохраните их перед повторной установкой.".to_owned()); }
+            notify(app, "cloning", "Продолжаю прерванное скачивание Forge Neo…");
+            run_logged(app, control, "git", &["fetch".to_owned(), "--depth".to_owned(), "1".to_owned(), "origin".to_owned(), "neo".to_owned()], &directory, None)?;
+            run_logged(app, control, "git", &["reset".to_owned(), "--hard".to_owned(), "FETCH_HEAD".to_owned()], &directory, None)?;
+        }
+        notify(app, "cloning", "Найден ранее скачанный Forge Neo; продолжаю установку.");
+    } else {
+        run_logged(app, control, "git", &[
+            "clone".to_owned(), "--progress".to_owned(), "--depth".to_owned(), "1".to_owned(),
+            "--single-branch".to_owned(), "--branch".to_owned(), "neo".to_owned(),
+            FORGE_NEO_REPO.to_owned(), directory.to_string_lossy().into_owned(),
+        ], parent, None)?;
+    }
+    if !directory.join("launch.py").is_file() || !directory.join("modules_forge").is_dir() {
+        return Err("В скачанном репозитории Forge Neo не найдены файлы запуска.".to_owned());
+    }
+
+    let uv = uv_for_forge(app, control, parent)?;
+    let python = venv_python(&directory);
+    if !python.is_file() {
+        notify(app, "venv", "Создание отдельного окружения Python 3.13 для Forge Neo…");
+        run_logged(app, control, &uv.to_string_lossy(), &[
+            "venv".to_owned(), "venv".to_owned(), "--python".to_owned(), "3.13".to_owned(), "--seed".to_owned(),
+        ], &directory, None)?;
+    }
+    if !python.is_file() { return Err("Окружение Python Forge Neo не было создано.".to_owned()); }
+    let version = command_output(app, &python.to_string_lossy(), &[
+        "-c".to_owned(), "import sys; print('%d.%d' % sys.version_info[:2])".to_owned(),
+    ])?;
+    if version != "3.13" {
+        return Err(format!("Forge Neo требует Python 3.13, а найден {version}. Удалите только папку venv внутри sd-webui-forge-neo и повторите установку."));
+    }
+    notify(app, "dependencies", "Обновление pip в окружении Forge Neo…");
+    run_logged_retry_locked(app, control, &python.to_string_lossy(), &[
+        "-m".to_owned(), "pip".to_owned(), "install".to_owned(), "--upgrade".to_owned(), "pip".to_owned(),
+    ], &directory)?;
+    notify(app, "dependencies", "Forge Neo устанавливает PyTorch и остальные зависимости; это может занять некоторое время…");
+    run_logged_retry_locked(app, control, &python.to_string_lossy(), &[
+        "-u".to_owned(), "launch.py".to_owned(), "--exit".to_owned(),
+    ], &directory)?;
+    if control.cancelled.load(Ordering::SeqCst) { return Err("Установка отменена.".to_owned()); }
+    if !python_module_installed(&python, "torch")? || !python_module_installed(&python, "gradio")? {
+        return Err("Зависимости Forge Neo установились не полностью. Повторите установку.".to_owned());
+    }
+    let version = command_output(app, "git", &[
+        "-C".to_owned(), directory.to_string_lossy().into_owned(), "describe".to_owned(),
+        "--tags".to_owned(), "--always".to_owned(),
+    ]).unwrap_or_else(|_| "Установлен".to_owned());
+    fs::write(directory.join(".flow-installed.json"), json!({ "name": "Forge Neo", "version": version }).to_string())
+        .map_err(|error| error.to_string())?;
+    crate::activate_managed_forge_neo(app, &directory)?;
+    notify(app, "done", "Forge Neo установлен отдельно и готов к запуску.");
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn install_forge_neo_web_ui(app: AppHandle, state: State<'_, Arc<InstallControl>>, webui: State<'_, WebuiControl>, downloads: State<'_, Arc<crate::civitai::DownloadControl>>, installation_dir: String) -> Result<(), String> {
+    if webui.is_running() { return Err("Остановите WebUI перед установкой Forge Neo.".to_owned()); }
+    if downloads.is_running() { return Err("Дождитесь завершения скачивания модели перед установкой Forge Neo.".to_owned()); }
+    let selected = crate::paths::subprocess_path(&PathBuf::from(installation_dir.trim()));
+    if !selected.is_absolute() || !selected.is_dir() { return Err("Выберите существующую папку установки.".to_owned()); }
+    let selected = crate::paths::subprocess_path(&selected.canonicalize().map_err(|error| error.to_string())?);
+    let saved = crate::paths::subprocess_path(&crate::installation_dir(&app)?.canonicalize().map_err(|error| error.to_string())?);
+    if selected != saved { return Err("Папка установки изменилась. Повторите выбор.".to_owned()); }
+    if state.running.swap(true, Ordering::SeqCst) { return Err("Установка уже выполняется.".to_owned()); }
+    state.cancelled.store(false, Ordering::SeqCst);
+    let control = Arc::clone(&*state);
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(error) = install_forge_neo(&app, &control, &selected) {
+            notify(&app, if control.cancelled.load(Ordering::SeqCst) { "cancelled" } else { "error" }, error);
+        }
+        control.running.store(false, Ordering::SeqCst);
+    });
     Ok(())
 }
 

@@ -164,6 +164,13 @@ fn write_settings(app: &AppHandle, settings: &Settings) -> Result<(), String> {
     fs::write(path, bytes).map_err(|error| error.to_string())
 }
 
+pub(crate) fn activate_managed_forge_neo(app: &AppHandle, directory: &std::path::Path) -> Result<(), String> {
+    let mut settings = read_settings(app)?;
+    settings.forge_neo_dir = Some(directory.to_string_lossy().into_owned());
+    settings.active_package = "forge-neo".to_owned();
+    write_settings(app, &settings)
+}
+
 pub(crate) fn installation_dir(app: &AppHandle) -> Result<PathBuf, String> {
     if let Some(saved) = read_settings(app)?.installation_dir {
         return Ok(paths::subprocess_path(&PathBuf::from(saved)));
@@ -189,10 +196,18 @@ pub(crate) fn package_dir(app: &AppHandle) -> Result<PathBuf, String> {
 fn active_package_installed(app: &AppHandle) -> Result<bool, String> {
     let directory = package_dir(app)?;
     if active_package(app)? == "forge-neo" {
-        Ok(directory.join("launch.py").is_file() && installer::venv_python(&directory).is_file())
+        Ok(forge_neo_ready(app, &directory)?)
     } else {
         Ok(directory.join(".flow-installed.json").is_file())
     }
+}
+
+fn forge_neo_ready(app: &AppHandle, directory: &std::path::Path) -> Result<bool, String> {
+    let managed = installation_dir(app)?.join("sd-webui-forge-neo");
+    Ok(directory.join("launch.py").is_file()
+        && directory.join("modules_forge").is_dir()
+        && installer::venv_python(directory).is_file()
+        && (directory != managed || directory.join(".flow-installed.json").is_file()))
 }
 
 pub(crate) fn webui_arguments(app: &AppHandle) -> Result<Vec<String>, String> {
@@ -238,12 +253,15 @@ fn get_state(app: AppHandle, webui: State<'_, installer::WebuiControl>) -> Resul
     }
     if let Some(path) = settings.forge_neo_dir {
         let directory = paths::subprocess_path(&PathBuf::from(path));
-        if directory.join("launch.py").is_file() && installer::venv_python(&directory).is_file() {
+        if forge_neo_ready(&app, &directory)? {
             let running = webui.is_running() && webui.package_id().as_deref() == Some("forge-neo");
             packages.push(PackageInfo {
                 id: "forge-neo".to_owned(),
                 name: "Stable Diffusion WebUI Forge – Neo".to_owned(),
-                version: "Подключён".to_owned(),
+                version: fs::read(directory.join(".flow-installed.json")).ok()
+                    .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                    .and_then(|value| value.get("version").and_then(serde_json::Value::as_str).map(str::to_owned))
+                    .unwrap_or_else(|| "Подключён".to_owned()),
                 path: directory.to_string_lossy().into_owned(),
                 running,
                 stopping: running && webui.is_stopping(),
@@ -309,7 +327,9 @@ fn select_package(app: AppHandle, package_id: String, webui: State<'_, installer
     } else if package_id == "automatic1111" {
         installation_dir(&app)?.join("sd-webui")
     } else { return Err("Неизвестный пакет.".to_owned()); };
-    if !directory.join("launch.py").is_file() { return Err("Пакет больше не найден в выбранной папке.".to_owned()); }
+    let ready = if package_id == "forge-neo" { forge_neo_ready(&app, &directory)? }
+        else { directory.join("launch.py").is_file() };
+    if !ready { return Err("Пакет не найден или установка ещё не завершена.".to_owned()); }
     let mut settings = read_settings(&app)?;
     settings.active_package = package_id;
     write_settings(&app, &settings)
@@ -459,6 +479,7 @@ pub fn run() {
             gallery::list_gallery_images,
             set_page,
             installer::install_web_ui,
+            installer::install_forge_neo_web_ui,
             installer::cancel_install,
             installer::launch_web_ui,
             installer::stop_web_ui,
