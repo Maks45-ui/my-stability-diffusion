@@ -14,8 +14,6 @@ function element<T extends HTMLElement>(id: string): T {
 }
 
 const sidebar = element<HTMLElement>("sidebar");
-const navIndicator = element<HTMLElement>("nav-indicator");
-const nav = element<HTMLElement>("navigation");
 const toast = element<HTMLElement>("toast");
 const installDialog = element<HTMLDialogElement>("install-dialog");
 const installPackageType = element<HTMLSelectElement>("install-package-type");
@@ -66,7 +64,7 @@ let stateSequence = 0;
 let debounceTimer: number | undefined;
 let toastTimer: number | undefined;
 let installing = false;
-let installingPackageId: PackageInfo["id"] = "automatic1111";
+let installingPackageId: PackageInfo["id"] = "forge-neo";
 let stoppingWebui = false;
 let webuiControlBusy = false;
 let hasWebuiPackage = false;
@@ -197,9 +195,8 @@ async function refreshPreflight(): Promise<void> {
   target.parentElement!.hidden = importForge;
   if (importForge) return;
   target.textContent = "Проверяем окружение…";
-  const packageId: PackageInfo["id"] = installPackageType.value === "forge-neo-install" ? "forge-neo" : "automatic1111";
   try {
-    const report = await window.flow.getPreflight(packageId);
+    const report = await window.flow.getPreflight("forge-neo");
     if (request !== preflightSequence || !installDialog.open) return;
     renderChecks(target, report);
     element<HTMLButtonElement>("start-install").disabled = !report.canProceed;
@@ -369,13 +366,6 @@ async function openWebuiSettings(): Promise<void> {
   } catch (error) { setWebuiSettingsMessage(message(error), true); }
 }
 
-function updateIndicator(): void {
-  const active = nav.querySelector<HTMLButtonElement>(".nav-item.active");
-  if (!active) return;
-  navIndicator.style.transform = `translateY(${active.offsetTop}px)`;
-  navIndicator.style.height = `${active.offsetHeight}px`;
-}
-
 function showPage(page: Page): void {
   document.querySelectorAll<HTMLElement>(".page").forEach((section) => section.classList.toggle("active", section.id === `page-${page}`));
   document.querySelectorAll<HTMLButtonElement>(".nav-item").forEach((button) => {
@@ -383,7 +373,6 @@ function showPage(page: Page): void {
     button.classList.toggle("active", active);
     if (active) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");
   });
-  window.requestAnimationFrame(updateIndicator);
   void window.flow.setPage(page).catch(() => { /* Discord may be unavailable. */ });
   if (page === "models" && !hasLoadedCatalog) {
     hasLoadedCatalog = true;
@@ -803,7 +792,6 @@ function finishSidebarAnimation(): void {
   sidebarAnimating = false;
   window.clearTimeout(sidebarAnimationTimer);
   sidebar.classList.remove("is-animating");
-  window.requestAnimationFrame(updateIndicator);
 }
 
 sidebar.addEventListener("transitionend", (event: TransitionEvent) => {
@@ -837,17 +825,11 @@ element<HTMLButtonElement>("add-package").addEventListener("click", () => {
 });
 installPackageType.addEventListener("change", () => {
   const importForge = installPackageType.value === "forge-neo-import";
-  const installForge = installPackageType.value === "forge-neo-install";
-  element<HTMLElement>("automatic-install-location").hidden = importForge;
+  element<HTMLElement>("package-install-location").hidden = importForge;
   element<HTMLElement>("forge-install-location").hidden = !importForge;
-  element<HTMLElement>("install-subfolder").textContent = installForge
-    ? "Forge Neo будет установлен отдельно в подпапку sd-webui-forge-neo."
-    : "Пакет будет установлен в подпапку sd-webui.";
   element<HTMLElement>("install-description").textContent = importForge
     ? "Подключите готовый Forge Neo из Stability Matrix. В Stability Matrix откройте папку пакета через меню «⋮» и остановите его перед запуском в Flow."
-    : installForge
-      ? "Flow скачает ветку Forge Neo, подготовит Python 3.13 в отдельном окружении и установит зависимости. Ход установки появится в консоли."
-      : "Flow проверит Git и Python 3.10, загрузит WebUI и создаст отдельное окружение. Логи откроются при запуске установки.";
+    : "Flow скачает Forge Neo, подготовит Python 3.13 в отдельном окружении и установит зависимости. Ход установки появится в консоли.";
   element<HTMLButtonElement>("start-install").textContent = importForge ? "Подключить Forge Neo" : "Начать установку";
   element<HTMLButtonElement>("start-install").disabled = !importForge;
   void refreshPreflight();
@@ -875,16 +857,14 @@ element<HTMLButtonElement>("start-install").addEventListener("click", async () =
     return;
   }
   if (!installationDir) { notify("Сначала выберите папку установки."); return; }
-  const forge = installPackageType.value === "forge-neo-install";
-  installingPackageId = forge ? "forge-neo" : "automatic1111";
+  installingPackageId = "forge-neo";
   setInstalling(true);
   installDialog.close();
   setConsoleVisible(true);
   setConsoleStatus("Установка", "running");
-  queueLog(terminal, `[Установка] Начало установки ${forge ? "Forge Neo" : "AUTOMATIC1111 WebUI"}...`);
+  queueLog(terminal, `[Установка] Начало установки ${"Forge Neo"}...`);
   try {
-    if (forge) await window.flow.installForgeNeo(installationDir);
-    else await window.flow.installWebUI(installationDir);
+    await window.flow.installForgeNeo(installationDir);
   }
   catch (error) {
     setInstalling(false);
@@ -1009,7 +989,6 @@ element<HTMLFormElement>("token-form").addEventListener("submit", async (event) 
   try { await window.flow.saveCivitaiToken(input.value); input.value = ""; notify("Ключ Civitai сохранён."); await refreshState(); }
   catch (error) { notify(message(error)); }
 });
-window.addEventListener("resize", updateIndicator);
 void window.flow.onTask(onTask).catch((error: unknown) => notify(message(error)));
 const firstRun = new FirstRunController(
   flowApi,
@@ -1024,4 +1003,4 @@ window.setInterval(() => { if (document.visibilityState === "visible") void refr
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") void refreshWebUIStatus(); });
 void downloadManager.restore().catch((error: unknown) => notify(message(error)));
 void window.flow.setPage("home").catch(() => { /* Discord may be unavailable. */ });
-window.requestAnimationFrame(updateIndicator);
+

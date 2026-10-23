@@ -511,7 +511,6 @@ pub fn run() {
             save_webui_settings,
             gallery::list_gallery_images,
             set_page,
-            installer::install_web_ui,
             installer::install_forge_neo_web_ui,
             installer::cancel_install,
             installer::launch_web_ui,

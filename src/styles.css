@@ -67,7 +67,6 @@ img { display: block; }
 .icon-button { width: 40px; height: 40px; flex: 0 0 auto; display: grid; place-items: center; border: 0; border-radius: 11px; color: var(--text); background: transparent; font-size: 22px; transition: background-color .18s, transform .18s; }
 .icon-button:hover { background: var(--surface); transform: translateY(-1px); }
 .navigation { position: relative; display: flex; flex-direction: column; gap: 6px; flex: 1; }
-.nav-indicator { position: absolute; top: 0; left: 0; right: 0; height: 46px; border-radius: 11px; background: linear-gradient(110deg, var(--nav-start), var(--nav-end)); box-shadow: 0 7px 20px var(--accent-glow); pointer-events: none; transition: transform .22s cubic-bezier(.22,1,.36,1), height .22s, background .25s; }
 .nav-item { position: relative; z-index: 1; height: 46px; width: 100%; border: 0; border-radius: 11px; background: transparent; color: var(--muted); display: flex; align-items: center; gap: 12px; padding: 0 14px; white-space: nowrap; text-align: left; font-size: 13px; font-weight: 620; transition: color .18s, background-color .18s, transform .18s; }
 .nav-item:hover { color: var(--text); background: var(--nav-hover); transform: translateX(2px); }
 .nav-item.active, .nav-item.active:hover { color: #fff; background: transparent; transform: none; }

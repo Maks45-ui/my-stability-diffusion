@@ -107,7 +107,6 @@ export interface WebUISettings {
 export interface FlowAPI {
   getState(): Promise<AppState>;
   getWebUIStatus(): Promise<WebUIStatus>;
-  installWebUI(installationDir: string): Promise<void>;
   installForgeNeo(installationDir: string): Promise<void>;
   browseInstallationDirectory(currentPath: string): Promise<string | null>;
   saveInstallationDirectory(directory: string): Promise<void>;

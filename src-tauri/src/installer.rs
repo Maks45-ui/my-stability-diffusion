@@ -794,32 +794,6 @@ pub(crate) async fn install_forge_neo_web_ui(app: AppHandle, state: State<'_, Ar
 }
 
 #[tauri::command]
-pub(crate) async fn install_web_ui(app: AppHandle, state: State<'_, Arc<InstallControl>>, webui: State<'_, WebuiControl>, downloads: State<'_, Arc<crate::civitai::DownloadControl>>, installation_dir: String) -> Result<(), String> {
-    if webui.is_running() { return Err("Остановите WebUI перед установкой пакета.".to_owned()); }
-    if downloads.is_running() { return Err("Дождитесь завершения скачивания модели перед установкой WebUI.".to_owned()); }
-    let selected = crate::paths::subprocess_path(&PathBuf::from(installation_dir.trim()));
-    if !selected.is_absolute() || !selected.is_dir() { return Err("Выберите существующую папку установки.".to_owned()); }
-    // Reject stale UI state: the path passed to Rust must be the saved selection.
-    let selected = crate::paths::subprocess_path(&selected.canonicalize().map_err(|error| error.to_string())?);
-    let saved = crate::paths::subprocess_path(&crate::installation_dir(&app)?.canonicalize().map_err(|error| error.to_string())?);
-    if selected != saved {
-        return Err("Папка установки изменилась. Повторите выбор.".to_owned());
-    }
-    if state.running.swap(true, Ordering::SeqCst) { return Err("Установка уже выполняется.".to_owned()); }
-    state.cancelled.store(false, Ordering::SeqCst);
-    let control = Arc::clone(&*state);
-    tauri::async_runtime::spawn_blocking(move || {
-        let outcome = install(&app, &control, &selected);
-        if let Err(error) = outcome {
-            let phase = if control.cancelled.load(Ordering::SeqCst) { "cancelled" } else { "error" };
-            notify(&app, phase, error);
-        }
-        control.running.store(false, Ordering::SeqCst);
-    });
-    Ok(())
-}
-
-#[tauri::command]
 pub(crate) fn cancel_install(app: AppHandle, state: State<'_, Arc<InstallControl>>) {
     state.cancelled.store(true, Ordering::SeqCst);
     if let Ok(slot) = state.pid.lock() {

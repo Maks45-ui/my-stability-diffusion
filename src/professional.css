@@ -15,7 +15,7 @@ button:active:not(:disabled) { transform: translateY(1px) !important; }
 .page { animation: page-in .18s ease-out both; }
 @keyframes page-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
-/* Sidebar: the active position is a 2px rail rather than a filled pill. */
+/* Sidebar: the active page uses one rounded highlight without an extra rail. */
 .sidebar.glass-surface { padding: 14px 10px 12px; background: var(--sidebar); }
 .sidebar-top { min-height: 42px; padding: 0 2px 20px; gap: 8px; }
 .sidebar-brand { gap: 8px; font-size: 15px; font-weight: 680; letter-spacing: -.03em; }
@@ -24,7 +24,6 @@ button:active:not(:disabled) { transform: translateY(1px) !important; }
 .icon-button { width: 32px; height: 32px; color: var(--muted); font-size: 18px; transition: color .16s ease-out, background-color .16s ease-out; }
 .icon-button:hover { background: var(--surface); color: var(--text); transform: none; }
 .navigation { gap: 3px; }
-.nav-indicator { left: 0; right: auto; width: 3px; height: 40px; border-radius: 999px; background: var(--accent); box-shadow: none; transition: transform .18s ease-out, height .18s ease-out; }
 .nav-item { height: 40px; gap: 10px; padding: 0 11px; color: var(--muted); font-size: 12px; font-weight: 560; transition: color .16s ease-out, background-color .16s ease-out; }
 .nav-item:hover { color: var(--text); background: var(--nav-hover); transform: none; }
 .nav-item.active, .nav-item.active:hover { color: var(--text); background: var(--accent-soft); font-weight: 650; }
