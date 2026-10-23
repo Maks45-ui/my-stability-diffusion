@@ -78,11 +78,15 @@ pub(crate) struct WebuiControl {
     ready_url: Arc<Mutex<Option<String>>>,
     ready_pending: Arc<AtomicBool>,
     generation: Arc<AtomicU64>,
+    package_id: Arc<Mutex<Option<String>>>,
     #[cfg(windows)]
     job: Arc<Mutex<Option<WindowsJob>>>,
 }
 
 impl WebuiControl {
+    pub(crate) fn package_id(&self) -> Option<String> {
+        self.package_id.lock().unwrap_or_else(|poison| poison.into_inner()).clone()
+    }
     pub(crate) fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
     }
@@ -99,6 +103,10 @@ impl WebuiControl {
         if self.exited.load(Ordering::SeqCst) || self.stopping.load(Ordering::SeqCst) { return None; }
         self.ready_url.lock().unwrap_or_else(|poison| poison.into_inner()).clone()
     }
+}
+
+pub(crate) fn venv_python(directory: &Path) -> PathBuf {
+    if cfg!(windows) { directory.join("venv/Scripts/python.exe") } else { directory.join("venv/bin/python") }
 }
 
 const WEBUI_OPEN_DELAY: Duration = Duration::from_millis(1500);
@@ -192,7 +200,8 @@ fn python_module_installed(python: &Path, module: &str) -> Result<bool, String> 
 fn parse_webui_ready_url(line: &str) -> Option<String> {
     let marker = "Running on local URL:";
     let (_, suffix) = line.split_once(marker)?;
-    let (_, port_text) = suffix.split_once("http://127.0.0.1:")?;
+    let port_text = ["http://127.0.0.1:", "http://localhost:"]
+        .iter().find_map(|host| suffix.split_once(host).map(|(_, port)| port))?;
     let digits: String = port_text.chars().take_while(char::is_ascii_digit).collect();
     let port = digits.parse::<u16>().ok().filter(|port| *port != 0)?;
     Some(format!("http://127.0.0.1:{port}"))
@@ -737,18 +746,25 @@ pub(crate) async fn install_xformers(
 }
 
 #[tauri::command]
-pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, installs: State<'_, Arc<InstallControl>>) -> Result<(), String> {
+pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, installs: State<'_, Arc<InstallControl>>, package_id: Option<String>) -> Result<(), String> {
     if webui.is_running() { return Err("WebUI уже запущен или запускается.".to_owned()); }
     if installs.is_running() { return Err("Дождитесь завершения установки пакета или xformers.".to_owned()); }
-    let directory = installation_dir(&app)?.join("sd-webui");
-    if !directory.join(".flow-installed.json").is_file() { return Err("Сначала установите пакет.".to_owned()); }
+    let package_id = package_id.unwrap_or(crate::active_package(&app)?);
+    if package_id != "automatic1111" && package_id != "forge-neo" { return Err("Неизвестный пакет.".to_owned()); }
+    if crate::active_package(&app)? != package_id { return Err("Сначала выберите пакет в списке Flow.".to_owned()); }
+    let forge = package_id == "forge-neo";
+    let directory = if forge {
+        crate::package_dir(&app)?
+    } else { installation_dir(&app)?.join("sd-webui") };
+    if !forge && !directory.join(".flow-installed.json").is_file() { return Err("Сначала установите пакет.".to_owned()); }
     if !directory.join("launch.py").is_file() { return Err("Файл запуска WebUI не найден.".to_owned()); }
-    let requirements = flow_requirements(&directory)?;
-    let python = if cfg!(windows) { directory.join("venv/Scripts/python.exe") } else { directory.join("venv/bin/python") };
+    if forge && !directory.join("modules_forge").is_dir() { return Err("Выбрана не папка Forge Neo.".to_owned()); }
+    let requirements = if forge { None } else { Some(flow_requirements(&directory)?) };
+    let python = venv_python(&directory);
     if !python.is_file() { return Err("Виртуальное окружение WebUI не найдено.".to_owned()); }
     let mut arguments = parse_webui_arguments(&crate::webui_arguments(&app)?)?;
     let detected_vram = nvidia_vram_mib();
-    let memory_profile = apply_memory_flags(&mut arguments, crate::sdxl_memory_profile(&app)?, detected_vram);
+    let memory_profile = !forge && apply_memory_flags(&mut arguments, crate::sdxl_memory_profile(&app)?, detected_vram);
     if memory_profile {
         if arguments.iter().any(|arg| matches!(arg.as_str(), "--disable-extra-extensions" | "--disable-all-extensions")) {
             return Err("Режим безопасной смены моделей требует расширение Flow. Уберите --disable-extra-extensions/--disable-all-extensions из аргументов запуска.".to_owned());
@@ -760,9 +776,8 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, inst
     // Passing args directly to launch.py also avoids shell quoting and a visible CMD window.
     let mut command = Command::new(python);
     command.arg("-u").arg("launch.py").args(&arguments);
-    use_local_clip_sources(&mut command, &directory);
+    if !forge { use_local_clip_sources(&mut command, &directory); }
     command.current_dir(&directory)
-        .env("REQS_FILE", &requirements)
         .env("PYTHONUNBUFFERED", "1")
         .env("PYTHONIOENCODING", "utf-8:backslashreplace")
         .env("PYTHONFAULTHANDLER", "1")
@@ -771,6 +786,8 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, inst
         // The saved flags are passed as argv; inherited COMMANDLINE_ARGS must not repeat them.
         .env_remove("COMMANDLINE_ARGS")
         .stdin(Stdio::null());
+    if let Some(requirements) = requirements { command.env("REQS_FILE", requirements); }
+    else { command.env_remove("REQS_FILE").env_remove("FLOW_SAFE_MODEL_SWITCH"); }
     if memory_profile {
         // Configure only this Python process, before torch is imported.
         command.env("PYTORCH_CUDA_ALLOC_CONF", SDXL_ALLOC_CONF);
@@ -781,6 +798,7 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, inst
     }
     hide_console(&mut command);
     if webui.running.swap(true, Ordering::SeqCst) { return Err("WebUI уже запущен или запускается.".to_owned()); }
+    *webui.package_id.lock().unwrap_or_else(|poison| poison.into_inner()) = Some(package_id);
     webui.stopping.store(false, Ordering::SeqCst);
     webui.stopped.store(false, Ordering::SeqCst);
     webui.exited.store(false, Ordering::SeqCst);
@@ -966,6 +984,7 @@ mod tests {
     #[test]
     fn webui_ready_url_uses_reported_port() {
         assert_eq!(parse_webui_ready_url("[WebUI] Running on local URL:  http://127.0.0.1:7861\r"), Some("http://127.0.0.1:7861".to_owned()));
+        assert_eq!(parse_webui_ready_url("Running on local URL:  http://localhost:7862"), Some("http://127.0.0.1:7862".to_owned()));
         assert_eq!(parse_webui_ready_url("Running on local URL: http://127.0.0.1:0"), None);
         assert_eq!(parse_webui_ready_url("Running on local URL: http://127.0.0.1:99999"), None);
         assert_eq!(parse_webui_ready_url("Running on public URL: http://127.0.0.1:7860"), None);

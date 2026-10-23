@@ -2,6 +2,7 @@ export type Page = "home" | "gallery" | "models" | "settings";
 export type TaskPhase = "idle" | "checking" | "cloning" | "venv" | "dependencies" | "starting" | "stabilizing" | "ready" | "running" | "stopping" | "log" | "model_error" | "paused" | "done" | "error" | "cancelled";
 
 export interface PackageInfo {
+  id: "automatic1111" | "forge-neo";
   name: string;
   version: string;
   path: string;
@@ -9,6 +10,7 @@ export interface PackageInfo {
   stopping: boolean;
   stopped: boolean;
   readyUrl: string | null;
+  active: boolean;
 }
 
 export interface AppState {
@@ -86,7 +88,9 @@ export interface FlowAPI {
   browseInstallationDirectory(currentPath: string): Promise<string | null>;
   saveInstallationDirectory(directory: string): Promise<void>;
   cancelInstall(): Promise<void>;
-  launchWebUI(): Promise<void>;
+  launchWebUI(packageId?: PackageInfo["id"]): Promise<void>;
+  registerForgeNeo(directory: string): Promise<void>;
+  selectPackage(packageId: PackageInfo["id"]): Promise<void>;
   stopWebUI(): Promise<void>;
   openWebUI(): Promise<void>;
   getWebUIArguments(): Promise<string[]>;

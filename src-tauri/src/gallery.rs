@@ -2,7 +2,7 @@ use serde::Serialize;
 use std::{fs, path::Path, time::UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 
-use crate::{installation_dir, paths};
+use crate::{package_dir, paths};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,15 +42,17 @@ fn scan_directory(directory: &Path, kind: &'static str, images: &mut Vec<Gallery
 }
 
 fn list_images(app: AppHandle) -> Result<Vec<GalleryImage>, String> {
-    let outputs = installation_dir(&app)?.join("sd-webui").join("outputs");
+    let package = package_dir(&app)?;
     let mut images = Vec::new();
     for (folder, kind) in [("txt2img-images", "txt2img"), ("img2img-images", "img2img")] {
-        let directory = outputs.join(folder);
-        if !directory.is_dir() { continue; }
-        // The installation folder can be on any drive, so a static asset scope is insufficient.
-        let directory = paths::subprocess_path(&directory.canonicalize().map_err(|error| error.to_string())?);
-        scan_directory(&directory, kind, &mut images)?;
-        app.asset_protocol_scope().allow_directory(&directory, true).map_err(|error| error.to_string())?;
+        for root in ["outputs", "output"] {
+            let directory = package.join(root).join(folder);
+            if !directory.is_dir() { continue; }
+            // The installation folder can be on any drive, so a static asset scope is insufficient.
+            let directory = paths::subprocess_path(&directory.canonicalize().map_err(|error| error.to_string())?);
+            scan_directory(&directory, kind, &mut images)?;
+            app.asset_protocol_scope().allow_directory(&directory, true).map_err(|error| error.to_string())?;
+        }
     }
     images.sort_unstable_by(|left, right| right.modified_at.cmp(&left.modified_at).then_with(|| left.path.cmp(&right.path)));
     Ok(images)

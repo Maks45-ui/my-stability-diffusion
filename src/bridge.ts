@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AppState, DownloadedFile, FlowAPI, GalleryImage, ModelFile, ModelSummary, Page, StarterModel, TaskEvent, WebUISettings, WebUIStatus } from "./types";
+import type { AppState, DownloadedFile, FlowAPI, GalleryImage, ModelFile, ModelSummary, PackageInfo, Page, StarterModel, TaskEvent, WebUISettings, WebUIStatus } from "./types";
 
 // The UI only knows this typed contract. System access stays in Rust.
 export const flowApi: FlowAPI = {
@@ -9,7 +9,9 @@ export const flowApi: FlowAPI = {
   getWebUIStatus: () => invoke<WebUIStatus>("get_webui_status"),
   installWebUI: (installationDir: string) => invoke<void>("install_web_ui", { installationDir }),
   cancelInstall: () => invoke<void>("cancel_install"),
-  launchWebUI: () => invoke<void>("launch_web_ui"),
+  launchWebUI: (packageId?: PackageInfo["id"]) => invoke<void>("launch_web_ui", { packageId }),
+  registerForgeNeo: (directory: string) => invoke<void>("register_forge_neo", { directory }),
+  selectPackage: (packageId: PackageInfo["id"]) => invoke<void>("select_package", { packageId }),
   stopWebUI: () => invoke<void>("stop_web_ui"),
   openWebUI: () => invoke<void>("open_web_ui"),
   getWebUIArguments: () => invoke<string[]>("get_webui_arguments"),

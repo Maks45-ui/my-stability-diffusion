@@ -305,6 +305,10 @@ h1, h2, h3, p { margin: 0; }
 .install-location { margin: 4px 0 19px; }
 .install-location label { display: block; margin-bottom: 8px; color: var(--text); font-size: 12px; font-weight: 700; }
 .install-location small { display: block; margin-top: 7px; color: var(--muted); font-size: 11px; }
+.install-package-label { display: block; margin-top: 17px; margin-bottom: 8px; color: var(--text); font-size: 12px; font-weight: 700; }
+.install-package-select { width: 100%; min-height: 41px; padding: 0 11px; border: 1px solid var(--line); border-radius: 0; background: var(--surface); color: var(--text); font-size: 13px; }
+.webui-memory-card[hidden], .install-location[hidden] { display: none; }
+.package-card[data-active="true"] { border-color: var(--accent); }
 
 .toast { position: fixed; right: 22px; bottom: 22px; max-width: 380px; padding: 13px 17px; border: 1px solid var(--line); border-radius: 11px; background: var(--toast-bg); color: white; box-shadow: var(--shadow); font-size: 12px; opacity: 0; pointer-events: none; transform: translateY(10px); transition: opacity .2s, transform .2s; z-index: 20; }
 .toast.visible { opacity: 1; transform: translateY(0); }

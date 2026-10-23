@@ -3,7 +3,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { DownloadManager } from "./download-manager";
 import { FirstRunController } from "./onboarding";
 import { ThemeController } from "./theme";
-import type { AppState, GalleryImage, ModelSummary, Page, TaskEvent } from "./types";
+import type { AppState, GalleryImage, ModelSummary, PackageInfo, Page, TaskEvent } from "./types";
 
 window.flow = flowApi;
 
@@ -18,6 +18,8 @@ const navIndicator = element<HTMLElement>("nav-indicator");
 const nav = element<HTMLElement>("navigation");
 const toast = element<HTMLElement>("toast");
 const installDialog = element<HTMLDialogElement>("install-dialog");
+const installPackageType = element<HTMLSelectElement>("install-package-type");
+const forgeDirInput = element<HTMLInputElement>("forge-dir-dialog");
 const webuiSettingsDialog = element<HTMLDialogElement>("webui-settings-dialog");
 const webuiArgInput = element<HTMLInputElement>("webui-arg-input");
 const webuiArgList = element<HTMLElement>("webui-arg-list");
@@ -69,6 +71,7 @@ let webuiControlBusy = false;
 let hasWebuiPackage = false;
 let webuiRunning = false;
 let installationDir = "";
+let activePackageId: PackageInfo["id"] = "automatic1111";
 let logFrame: number | undefined;
 let terminalHasOutput = false;
 let webuiDraft: string[] = [];
@@ -152,7 +155,7 @@ async function controlWebui(restart: boolean): Promise<void> {
     if (restart) {
       queueLog(terminal, "[WebUI] Запускаем процесс заново...");
       setConsoleStatus("Запуск WebUI", "running");
-      await window.flow.launchWebUI();
+      await window.flow.launchWebUI(activePackageId);
       webuiRunning = true;
     } else {
       setConsoleStatus("WebUI остановлен", "done");
@@ -258,6 +261,8 @@ function addWebuiArgument(raw: string): boolean {
 }
 
 async function openWebuiSettings(): Promise<void> {
+  const memoryCard = document.querySelector<HTMLElement>(".webui-memory-card");
+  if (memoryCard) memoryCard.hidden = activePackageId === "forge-neo";
   if (webuiSettingsDialog.open) return;
   webuiSettingsDialog.showModal();
   webuiSettingsReady = false;
@@ -312,6 +317,7 @@ function showPage(page: Page): void {
 function renderPackages(state: AppState): void {
   packageList.replaceChildren();
   const count = state.packages.length;
+  activePackageId = state.packages.find((item) => item.active)?.id ?? "automatic1111";
   hasWebuiPackage = count > 0;
   webuiRunning = state.packages.some((item) => item.running);
   updateConsoleControls();
@@ -328,7 +334,8 @@ function renderPackages(state: AppState): void {
   }
   for (const item of state.packages) {
     const card = make("article", "package-card glass-surface");
-    const icon = make("div", "package-icon", "A");
+    card.dataset.active = String(item.active);
+    const icon = make("div", "package-icon", item.id === "forge-neo" ? "F" : "A");
     const details = make("div", "package-details");
     details.append(make("h3", "", item.name), make("p", "", `${item.version} · Stable Diffusion`), make("small", "", item.path));
     if (item.readyUrl) details.append(make("small", "package-url", item.readyUrl));
@@ -338,14 +345,17 @@ function renderPackages(state: AppState): void {
     const actions = make("div", "package-actions");
     const launch = make("button", "primary-button", "Запустить");
     launch.type = "button";
-    launch.disabled = item.running || stoppingWebui || webuiControlBusy || installing;
+    launch.disabled = webuiRunning || stoppingWebui || webuiControlBusy || installing;
     launch.addEventListener("click", async () => {
       launch.disabled = true;
       setConsoleVisible(true);
       setConsoleStatus("Запуск WebUI", "running");
       queueLog(terminal, "[WebUI] Запуск...");
       try {
-        await window.flow.launchWebUI();
+        if (activePackageId !== item.id) await window.flow.selectPackage(item.id);
+        activePackageId = item.id;
+        await downloadManager.restore();
+        await window.flow.launchWebUI(item.id);
         webuiRunning = true;
         updateConsoleControls();
         await refreshState();
@@ -372,7 +382,15 @@ function renderPackages(state: AppState): void {
     const settings = make("button", "secondary-button", "Настройки");
     settings.type = "button";
     settings.prepend(make("span", "package-settings-icon", "⚙"));
-    settings.addEventListener("click", () => void openWebuiSettings());
+    settings.addEventListener("click", async () => {
+      try {
+        if (activePackageId !== item.id) await window.flow.selectPackage(item.id);
+        activePackageId = item.id;
+        await downloadManager.restore();
+        await refreshState();
+        await openWebuiSettings();
+      } catch (error) { notify(message(error)); }
+    });
     actions.append(launch, open, stop, settings);
     card.append(actions);
     packageList.append(card);
@@ -601,8 +619,11 @@ function onTask(event: TaskEvent): void {
       setInstalling(false);
       if (event.phase === "done") {
         notify("WebUI установлен.");
-        void refreshState();
-        void firstRun.onInstallComplete().then(() => {
+        void window.flow.selectPackage("automatic1111").then(async () => {
+          activePackageId = "automatic1111";
+          await downloadManager.restore();
+          await refreshState();
+          await firstRun.onInstallComplete();
           if (element<HTMLDialogElement>("first-run-dialog").open) setConsoleVisible(false);
         }).catch((error: unknown) => notify(message(error)));
       }
@@ -690,9 +711,37 @@ element<HTMLButtonElement>("add-package").addEventListener("click", () => {
   if (installing) setConsoleVisible(true);
   else installDialog.showModal();
 });
+installPackageType.addEventListener("change", () => {
+  const forge = installPackageType.value === "forge-neo";
+  element<HTMLElement>("automatic-install-location").hidden = forge;
+  element<HTMLElement>("forge-install-location").hidden = !forge;
+  element<HTMLElement>("install-description").textContent = forge
+    ? "Подключите готовый Forge Neo из Stability Matrix. В Stability Matrix откройте папку установленного пакета через меню «⋮». Перед запуском в Flow остановите этот пакет в Stability Matrix."
+    : "Flow проверит Git и Python 3.10, загрузит WebUI и создаст отдельное окружение. Логи откроются при запуске установки.";
+  element<HTMLButtonElement>("start-install").textContent = forge ? "Подключить Forge Neo" : "Начать установку";
+});
+element<HTMLButtonElement>("browse-forge-dialog").addEventListener("click", async () => {
+  try {
+    const selected = await window.flow.browseInstallationDirectory(forgeDirInput.value || installationDir);
+    if (selected) forgeDirInput.value = selected;
+  } catch (error) { notify(message(error)); }
+});
 element<HTMLButtonElement>("close-install").addEventListener("click", () => installDialog.close());
 element<HTMLButtonElement>("start-install").addEventListener("click", async () => {
   if (installing) return;
+  if (installPackageType.value === "forge-neo") {
+    if (!forgeDirInput.value.trim()) { notify("Выберите папку установленного Forge Neo."); return; }
+    try {
+      await window.flow.registerForgeNeo(forgeDirInput.value);
+      activePackageId = "forge-neo";
+      installDialog.close();
+      notify("Forge Neo подключён к Flow.");
+      await downloadManager.restore();
+      await refreshState();
+      await firstRun.onInstallComplete();
+    } catch (error) { notify(message(error)); }
+    return;
+  }
   if (!installationDir) { notify("Сначала выберите папку установки."); return; }
   setInstalling(true);
   installDialog.close();

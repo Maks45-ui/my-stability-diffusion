@@ -1,4 +1,4 @@
-use crate::{civitai_token, emit_task, installation_dir, TaskEvent};
+use crate::{civitai_token, emit_task, TaskEvent};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -196,7 +196,7 @@ fn safe_name(value: &str) -> String {
 }
 
 pub(crate) fn models_directory(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(installation_dir(app)?.join("sd-webui").join("models").join("Stable-diffusion"))
+    Ok(crate::package_dir(app)?.join("models").join("Stable-diffusion"))
 }
 
 fn paths(app: &AppHandle, file_name: &str) -> Result<(PathBuf, PathBuf, PathBuf), String> {

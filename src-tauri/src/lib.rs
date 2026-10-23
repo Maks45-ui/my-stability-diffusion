@@ -18,7 +18,13 @@ struct Settings {
     #[serde(default)]
     installation_dir: Option<String>,
     #[serde(default)]
+    forge_neo_dir: Option<String>,
+    #[serde(default)]
+    active_package: String,
+    #[serde(default)]
     webui_arguments: Vec<String>,
+    #[serde(default)]
+    forge_neo_arguments: Vec<String>,
     #[serde(default)]
     sdxl_memory_profile: bool,
     #[serde(default)]
@@ -46,6 +52,7 @@ struct AppState {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PackageInfo {
+    id: String,
     name: String,
     version: String,
     path: String,
@@ -53,6 +60,7 @@ struct PackageInfo {
     stopping: bool,
     stopped: bool,
     ready_url: Option<String>,
+    active: bool,
 }
 
 #[derive(Serialize)]
@@ -165,8 +173,31 @@ pub(crate) fn installation_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(paths::subprocess_path(&default))
 }
 
+pub(crate) fn active_package(app: &AppHandle) -> Result<String, String> {
+    let saved = read_settings(app)?.active_package;
+    Ok(if saved == "forge-neo" { saved } else { "automatic1111".to_owned() })
+}
+
+pub(crate) fn package_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    if active_package(app)? == "forge-neo" {
+        let saved = read_settings(app)?.forge_neo_dir.ok_or("Forge Neo ещё не подключён.")?;
+        return Ok(paths::subprocess_path(&PathBuf::from(saved)));
+    }
+    Ok(installation_dir(app)?.join("sd-webui"))
+}
+
+fn active_package_installed(app: &AppHandle) -> Result<bool, String> {
+    let directory = package_dir(app)?;
+    if active_package(app)? == "forge-neo" {
+        Ok(directory.join("launch.py").is_file() && installer::venv_python(&directory).is_file())
+    } else {
+        Ok(directory.join(".flow-installed.json").is_file())
+    }
+}
+
 pub(crate) fn webui_arguments(app: &AppHandle) -> Result<Vec<String>, String> {
-    Ok(read_settings(app)?.webui_arguments)
+    let settings = read_settings(app)?;
+    Ok(if settings.active_package == "forge-neo" { settings.forge_neo_arguments } else { settings.webui_arguments })
 }
 
 pub(crate) fn sdxl_memory_profile(app: &AppHandle) -> Result<bool, String> {
@@ -182,26 +213,46 @@ pub(crate) fn civitai_token(app: &AppHandle) -> Result<String, String> {
 #[tauri::command]
 fn get_state(app: AppHandle, webui: State<'_, installer::WebuiControl>) -> Result<AppState, String> {
     let parent = installation_dir(&app)?;
+    let settings = read_settings(&app)?;
     let package = parent.join("sd-webui");
     let marker = package.join(".flow-installed.json");
-    let packages = if marker.is_file() {
+    let mut packages = Vec::new();
+    if marker.is_file() {
         let version = fs::read(&marker)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
             .and_then(|value| value.get("version").and_then(serde_json::Value::as_str).map(str::to_owned))
-            .unwrap_or_else(|| "����������".to_owned());
-        vec![PackageInfo {
+            .unwrap_or_else(|| "Установлен".to_owned());
+        let running = webui.is_running() && webui.package_id().as_deref() == Some("automatic1111");
+        packages.push(PackageInfo {
+            id: "automatic1111".to_owned(),
             name: "AUTOMATIC1111 WebUI".to_owned(),
             version,
             path: package.to_string_lossy().into_owned(),
-            running: webui.is_running(),
-            stopping: webui.is_stopping(),
-            stopped: webui.was_stopped(),
-            ready_url: webui.ready_url(),
-        }]
-    } else {
-        Vec::new()
-    };
+            running,
+            stopping: running && webui.is_stopping(),
+            stopped: webui.was_stopped() && webui.package_id().as_deref() == Some("automatic1111"),
+            ready_url: if running { webui.ready_url() } else { None },
+            active: settings.active_package != "forge-neo",
+        });
+    }
+    if let Some(path) = settings.forge_neo_dir {
+        let directory = paths::subprocess_path(&PathBuf::from(path));
+        if directory.join("launch.py").is_file() && installer::venv_python(&directory).is_file() {
+            let running = webui.is_running() && webui.package_id().as_deref() == Some("forge-neo");
+            packages.push(PackageInfo {
+                id: "forge-neo".to_owned(),
+                name: "Stable Diffusion WebUI Forge – Neo".to_owned(),
+                version: "Подключён".to_owned(),
+                path: directory.to_string_lossy().into_owned(),
+                running,
+                stopping: running && webui.is_stopping(),
+                stopped: webui.was_stopped() && webui.package_id().as_deref() == Some("forge-neo"),
+                ready_url: if running { webui.ready_url() } else { None },
+                active: settings.active_package == "forge-neo",
+            });
+        }
+    }
     let token = civitai_token(&app)?;
     Ok(AppState {
         packages,
@@ -220,12 +271,12 @@ fn set_installation_dir(
     downloads: State<'_, Arc<civitai::DownloadControl>>,
 ) -> Result<(), String> {
     if installs.is_running() || webui.is_running() || downloads.is_running() {
-        return Err("��������� ���������� ���������, ������ WebUI ��� �������� ������ ����� ������ �����.".to_owned());
+        return Err("Дождитесь завершения установки, работы WebUI или загрузки модели перед сменой папки.".to_owned());
     }
     let path = paths::subprocess_path(&PathBuf::from(directory.trim()));
     // The dialog returns an existing directory. Recheck in Rust before persisting it.
     if !path.is_absolute() || !path.is_dir() {
-        return Err("�������� ������������ ���������� ����� ���������.".to_owned());
+        return Err("Выберите существующую абсолютную папку установки.".to_owned());
     }
     let normalized = paths::subprocess_path(&path.canonicalize().map_err(|error| error.to_string())?);
     let mut settings = read_settings(&app)?;
@@ -234,9 +285,40 @@ fn set_installation_dir(
 }
 
 #[tauri::command]
+fn register_forge_neo(app: AppHandle, directory: String, webui: State<'_, installer::WebuiControl>, installs: State<'_, Arc<installer::InstallControl>>, downloads: State<'_, Arc<civitai::DownloadControl>>) -> Result<(), String> {
+    if webui.is_running() || installs.is_running() || downloads.is_running() {
+        return Err("Дождитесь завершения текущего процесса перед подключением Forge Neo.".to_owned());
+    }
+    let path = paths::subprocess_path(&PathBuf::from(directory.trim()));
+    if !path.is_absolute() || !path.is_dir() { return Err("Выберите папку установленного Forge Neo.".to_owned()); }
+    let path = paths::subprocess_path(&path.canonicalize().map_err(|error| error.to_string())?);
+    if !path.join("launch.py").is_file() || !path.join("modules_forge").is_dir() || !installer::venv_python(&path).is_file() {
+        return Err("В папке не найдены launch.py, modules_forge и готовое окружение venv Forge Neo.".to_owned());
+    }
+    let mut settings = read_settings(&app)?;
+    settings.forge_neo_dir = Some(path.to_string_lossy().into_owned());
+    settings.active_package = "forge-neo".to_owned();
+    write_settings(&app, &settings)
+}
+
+#[tauri::command]
+fn select_package(app: AppHandle, package_id: String, webui: State<'_, installer::WebuiControl>, downloads: State<'_, Arc<civitai::DownloadControl>>) -> Result<(), String> {
+    if webui.is_running() || downloads.is_running() { return Err("Остановите WebUI и загрузку модели перед сменой активного пакета.".to_owned()); }
+    let directory = if package_id == "forge-neo" {
+        read_settings(&app)?.forge_neo_dir.map(PathBuf::from).ok_or("Forge Neo ещё не подключён.")?
+    } else if package_id == "automatic1111" {
+        installation_dir(&app)?.join("sd-webui")
+    } else { return Err("Неизвестный пакет.".to_owned()); };
+    if !directory.join("launch.py").is_file() { return Err("Пакет больше не найден в выбранной папке.".to_owned()); }
+    let mut settings = read_settings(&app)?;
+    settings.active_package = package_id;
+    write_settings(&app, &settings)
+}
+
+#[tauri::command]
 fn save_civitai_token(app: AppHandle, token: String) -> Result<(), String> {
     if token.len() > 512 {
-        return Err("������������ API-����.".to_owned());
+        return Err("Некорректный API-ключ.".to_owned());
     }
     let mut settings = read_settings(&app)?;
     settings.civitai_token = token.trim().to_owned();
@@ -259,7 +341,7 @@ fn get_onboarding_stage(app: AppHandle) -> Result<u8, String> {
     if get_onboarding_complete(app.clone())? { return Ok(3); }
     let mut settings = read_settings(&app)?;
     if settings.onboarding_stage >= 1 {
-        let installed = installation_dir(&app)?.join("sd-webui").join(".flow-installed.json").is_file();
+        let installed = active_package_installed(&app).unwrap_or(false);
         let stage = pending_onboarding_stage(settings.onboarding_stage, installed);
         if settings.onboarding_stage != stage {
             settings.onboarding_stage = stage;
@@ -284,7 +366,7 @@ fn apply_onboarding_token(settings: &mut Settings, token: Option<String>) -> Res
     if let Some(token) = token {
         let token = token.trim();
         if token.is_empty() || token.len() > 512 || token.chars().any(char::is_whitespace) {
-            return Err("������� ���������� API-���� ��� ��������.".to_owned());
+            return Err("Введите корректный API-ключ без пробелов.".to_owned());
         }
         settings.civitai_token = token.to_owned();
     }
@@ -296,8 +378,8 @@ fn apply_onboarding_token(settings: &mut Settings, token: Option<String>) -> Res
 fn finish_onboarding(app: AppHandle) -> Result<(), String> {
     let mut settings = read_settings(&app)?;
     if settings.onboarding_stage != 2
-        || !installation_dir(&app)?.join("sd-webui").join(".flow-installed.json").is_file() {
-        return Err("������� ��������� ��������� WebUI � ����� ������.".to_owned());
+        || !active_package_installed(&app)? {
+        return Err("Сначала завершите установку WebUI и выбор модели.".to_owned());
     }
     settings.onboarding_complete = true;
     settings.onboarding_stage = 3;
@@ -319,7 +401,8 @@ fn save_webui_arguments(app: AppHandle, arguments: Vec<String>) -> Result<Vec<St
     installer::parse_webui_arguments(&arguments)?;
     let normalized: Vec<String> = arguments.into_iter().map(|argument| argument.trim().to_owned()).collect();
     let mut settings = read_settings(&app)?;
-    settings.webui_arguments = normalized.clone();
+    if settings.active_package == "forge-neo" { settings.forge_neo_arguments = normalized.clone(); }
+    else { settings.webui_arguments = normalized.clone(); }
     write_settings(&app, &settings)?;
     Ok(normalized)
 }
@@ -327,17 +410,19 @@ fn save_webui_arguments(app: AppHandle, arguments: Vec<String>) -> Result<Vec<St
 #[tauri::command]
 fn get_webui_settings(app: AppHandle) -> Result<WebuiSettings, String> {
     let settings = read_settings(&app)?;
-    Ok(WebuiSettings { arguments: settings.webui_arguments, sdxl_memory_profile: settings.sdxl_memory_profile })
+    Ok(WebuiSettings { arguments: if settings.active_package == "forge-neo" { settings.forge_neo_arguments } else { settings.webui_arguments }, sdxl_memory_profile: settings.sdxl_memory_profile })
 }
 
 #[tauri::command]
 fn save_webui_settings(app: AppHandle, settings: WebuiSettings) -> Result<WebuiSettings, String> {
     installer::parse_webui_arguments(&settings.arguments)?;
     let mut saved = read_settings(&app)?;
-    saved.webui_arguments = settings.arguments.into_iter().map(|argument| argument.trim().to_owned()).collect();
+    let arguments = settings.arguments.into_iter().map(|argument| argument.trim().to_owned()).collect();
+    if saved.active_package == "forge-neo" { saved.forge_neo_arguments = arguments; }
+    else { saved.webui_arguments = arguments; }
     saved.sdxl_memory_profile = settings.sdxl_memory_profile;
     write_settings(&app, &saved)?;
-    Ok(WebuiSettings { arguments: saved.webui_arguments, sdxl_memory_profile: saved.sdxl_memory_profile })
+    Ok(WebuiSettings { arguments: if saved.active_package == "forge-neo" { saved.forge_neo_arguments } else { saved.webui_arguments }, sdxl_memory_profile: saved.sdxl_memory_profile })
 }
 
 #[tauri::command]
@@ -359,6 +444,8 @@ pub fn run() {
             get_state,
             get_webui_status,
             set_installation_dir,
+            register_forge_neo,
+            select_package,
             save_civitai_token,
             get_onboarding_complete,
             get_onboarding_stage,
