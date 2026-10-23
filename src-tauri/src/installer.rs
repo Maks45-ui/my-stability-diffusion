@@ -354,7 +354,7 @@ fn tail_webui_log(app: AppHandle, mut reader: fs::File, control: WebuiControl, s
     })
 }
 
-fn run_logged_kind(app: &AppHandle, control: &InstallControl, kind: &'static str, program: &str, args: &[String], cwd: &Path, locked_file: Option<Arc<AtomicBool>>) -> Result<(), String> {
+fn run_logged_kind(app: &AppHandle, control: &InstallControl, kind: &'static str, program: &str, args: &[String], cwd: &Path, locked_file: Option<Arc<AtomicBool>>, env: &[(&str, &Path)]) -> Result<(), String> {
     if control.cancelled.load(Ordering::SeqCst) { return Err("Установка отменена.".to_owned()); }
     let mut command = Command::new(program);
     command.args(args).current_dir(cwd)
@@ -365,6 +365,7 @@ fn run_logged_kind(app: &AppHandle, control: &InstallControl, kind: &'static str
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let requirements = cwd.join(".flow-requirements.txt");
     if requirements.is_file() { command.env("REQS_FILE", requirements); }
+    for &(key, value) in env { command.env(key, value); }
     use_local_clip_sources(&mut command, cwd);
     hide_console(&mut command);
     let mut child = command.spawn().map_err(|error| format!("Не удалось запустить {program}: {error}"))?;
@@ -388,7 +389,11 @@ fn run_logged_kind(app: &AppHandle, control: &InstallControl, kind: &'static str
 }
 
 fn run_logged(app: &AppHandle, control: &InstallControl, program: &str, args: &[String], cwd: &Path, locked_file: Option<Arc<AtomicBool>>) -> Result<(), String> {
-    run_logged_kind(app, control, "install", program, args, cwd, locked_file)
+    run_logged_kind(app, control, "install", program, args, cwd, locked_file, &[])
+}
+
+fn run_logged_with_env(app: &AppHandle, control: &InstallControl, program: &str, args: &[String], cwd: &Path, env: &[(&str, &Path)]) -> Result<(), String> {
+    run_logged_kind(app, control, "install", program, args, cwd, None, env)
 }
 
 const SDXL_ALLOC_CONF: &str = "backend:native,garbage_collection_threshold:0.6,max_split_size_mb:128";
@@ -495,11 +500,11 @@ fn apply_sdxl_memory_settings(directory: &Path) -> Result<(), String> {
         .map_err(|error| format!("Не удалось сохранить настройки памяти WebUI: {error}"))
 }
 
-fn run_logged_retry_locked(app: &AppHandle, control: &InstallControl, program: &str, args: &[String], cwd: &Path) -> Result<(), String> {
+fn run_logged_retry_locked_env(app: &AppHandle, control: &InstallControl, program: &str, args: &[String], cwd: &Path, env: &[(&str, &Path)]) -> Result<(), String> {
     const MAX_ATTEMPTS: usize = 3;
     for attempt in 1..=MAX_ATTEMPTS {
         let locked_file = Arc::new(AtomicBool::new(false));
-        match run_logged(app, control, program, args, cwd, Some(Arc::clone(&locked_file))) {
+        match run_logged_kind(app, control, "install", program, args, cwd, Some(Arc::clone(&locked_file)), env) {
             Ok(()) => return Ok(()),
             Err(_) if cfg!(windows) && locked_file.load(Ordering::SeqCst) && attempt < MAX_ATTEMPTS && !control.cancelled.load(Ordering::SeqCst) => {
                 notify(app, "dependencies", format!("Windows заблокировал временный файл pip; повтор команды ({}/{MAX_ATTEMPTS})…", attempt + 1));
@@ -512,6 +517,10 @@ fn run_logged_retry_locked(app: &AppHandle, control: &InstallControl, program: &
         }
     }
     unreachable!("цикл всегда возвращает результат последней попытки")
+}
+
+fn run_logged_retry_locked(app: &AppHandle, control: &InstallControl, program: &str, args: &[String], cwd: &Path) -> Result<(), String> {
+    run_logged_retry_locked_env(app, control, program, args, cwd, &[])
 }
 
 pub(crate) fn parse_webui_arguments(entries: &[String]) -> Result<Vec<String>, String> {
@@ -708,12 +717,16 @@ fn install_forge_neo(app: &AppHandle, control: &InstallControl, parent: &Path) -
     }
 
     let uv = uv_for_forge(app, control, parent)?;
+    let tools_dir = parent.join(".flow-tools");
+    let managed_python = tools_dir.join("python");
+    let uv_cache = tools_dir.join("uv-cache");
+    let pip_cache = tools_dir.join("pip-cache");
     let python = venv_python(&directory);
     if !python.is_file() {
         notify(app, "venv", "Создание отдельного окружения Python 3.13 для Forge Neo…");
-        run_logged(app, control, &uv.to_string_lossy(), &[
+        run_logged_with_env(app, control, &uv.to_string_lossy(), &[
             "venv".to_owned(), "venv".to_owned(), "--python".to_owned(), "3.13".to_owned(), "--seed".to_owned(),
-        ], &directory, None)?;
+        ], &directory, &[("UV_PYTHON_INSTALL_DIR", managed_python.as_path()), ("UV_CACHE_DIR", uv_cache.as_path())])?;
     }
     if !python.is_file() { return Err("Окружение Python Forge Neo не было создано.".to_owned()); }
     let version = command_output(app, &python.to_string_lossy(), &[
@@ -723,13 +736,13 @@ fn install_forge_neo(app: &AppHandle, control: &InstallControl, parent: &Path) -
         return Err(format!("Forge Neo требует Python 3.13, а найден {version}. Удалите только папку venv внутри sd-webui-forge-neo и повторите установку."));
     }
     notify(app, "dependencies", "Обновление pip в окружении Forge Neo…");
-    run_logged_retry_locked(app, control, &python.to_string_lossy(), &[
+    run_logged_retry_locked_env(app, control, &python.to_string_lossy(), &[
         "-m".to_owned(), "pip".to_owned(), "install".to_owned(), "--upgrade".to_owned(), "pip".to_owned(),
-    ], &directory)?;
+    ], &directory, &[("PIP_CACHE_DIR", pip_cache.as_path())])?;
     notify(app, "dependencies", "Forge Neo устанавливает PyTorch и остальные зависимости; это может занять некоторое время…");
-    run_logged_retry_locked(app, control, &python.to_string_lossy(), &[
+    run_logged_retry_locked_env(app, control, &python.to_string_lossy(), &[
         "-u".to_owned(), "launch.py".to_owned(), "--exit".to_owned(),
-    ], &directory)?;
+    ], &directory, &[("PIP_CACHE_DIR", pip_cache.as_path())])?;
     if control.cancelled.load(Ordering::SeqCst) { return Err("Установка отменена.".to_owned()); }
     if !python_module_installed(&python, "torch")? || !python_module_installed(&python, "gradio")? {
         return Err("Зависимости Forge Neo установились не полностью. Повторите установку.".to_owned());
@@ -862,7 +875,7 @@ pub(crate) async fn install_xformers(
             // Let the WebUI launcher choose its pinned wheel and use --no-deps.
             run_logged_kind(&app, &control, "xformers", &python.to_string_lossy(),
                 &["-u".to_owned(), "launch.py".to_owned(), "--exit".to_owned(), "--xformers".to_owned(), "--reinstall-xformers".to_owned(), "--skip-torch-cuda-test".to_owned()],
-                &directory, None)
+                &directory, None, &[])
                 .and_then(|_| xformers_version(&directory, &python).map(|_| ()))
         };
         match result {
