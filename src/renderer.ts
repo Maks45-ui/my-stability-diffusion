@@ -40,6 +40,12 @@ const galleryEmpty = element<HTMLElement>("gallery-empty");
 const galleryStatus = element<HTMLElement>("gallery-status");
 const galleryCount = element<HTMLElement>("gallery-count");
 const galleryRefresh = element<HTMLButtonElement>("refresh-gallery");
+const gallerySelect = element<HTMLButtonElement>("select-gallery");
+const galleryDelete = element<HTMLButtonElement>("delete-gallery");
+const gallerySelectedCount = element<HTMLElement>("gallery-selected-count");
+const galleryContextMenu = element<HTMLElement>("gallery-context-menu");
+const galleryDeleteDialog = element<HTMLDialogElement>("gallery-delete-dialog");
+const galleryDeleteConfirm = element<HTMLButtonElement>("confirm-gallery-delete");
 const modelGrid = element<HTMLElement>("model-grid");
 const catalogStatus = element<HTMLElement>("catalog-status");
 const searchInput = element<HTMLInputElement>("model-search");
@@ -60,6 +66,11 @@ new ThemeController(
 let hasLoadedCatalog = false;
 let searchSequence = 0;
 let gallerySequence = 0;
+let galleryImageCount = 0;
+let gallerySelectMode = false;
+const selectedGalleryPaths = new Set<string>();
+let contextGalleryImage: GalleryImage | null = null;
+let previewGalleryImage: GalleryImage | null = null;
 let stateSequence = 0;
 let debounceTimer: number | undefined;
 let toastTimer: number | undefined;
@@ -379,6 +390,7 @@ function showPage(page: Page): void {
     void searchModels();
   }
   if (page === "gallery") void refreshGallery();
+  else hideGalleryContextMenu();
 }
 
 function renderPackages(state: AppState): void {
@@ -572,16 +584,70 @@ async function showImage(url: string): Promise<void> {
   const image = element<HTMLImageElement>("full-image");
   image.onerror = null;
   image.alt = "Пример изображения модели";
+  previewGalleryImage = null;
+  hideGalleryContextMenu();
   image.removeAttribute("src");
   imageDialog.showModal();
   try { image.src = await window.flow.getPreview(url); }
   catch (error) { imageDialog.close(); notify(message(error)); }
 }
 
+function hideGalleryContextMenu(): void {
+  galleryContextMenu.hidden = true;
+  contextGalleryImage = null;
+  if (galleryContextMenu.parentElement !== document.body) document.body.append(galleryContextMenu);
+}
+
+function showGalleryContextMenu(item: GalleryImage, x: number, y: number): void {
+  hideGalleryContextMenu();
+  contextGalleryImage = item;
+  const host = imageDialog.open ? imageDialog : document.body;
+  host.append(galleryContextMenu);
+  const bounds = imageDialog.open ? imageDialog.getBoundingClientRect() : null;
+  const relativeX = x - (bounds?.left ?? 0);
+  const relativeY = y - (bounds?.top ?? 0);
+  galleryContextMenu.style.left = Math.max(8, relativeX) + "px";
+  galleryContextMenu.style.top = Math.max(8, relativeY) + "px";
+  galleryContextMenu.hidden = false;
+  const width = bounds?.width ?? window.innerWidth;
+  const height = bounds?.height ?? window.innerHeight;
+  galleryContextMenu.style.left = Math.max(8, Math.min(relativeX, width - galleryContextMenu.offsetWidth - 8)) + "px";
+  galleryContextMenu.style.top = Math.max(8, Math.min(relativeY, height - galleryContextMenu.offsetHeight - 8)) + "px";
+}
+
+function updateGallerySelection(): void {
+  galleryGrid.classList.toggle("selecting", gallerySelectMode);
+  gallerySelect.textContent = gallerySelectMode ? "Отмена" : "Выбрать";
+  galleryDelete.hidden = !gallerySelectMode;
+  galleryDelete.disabled = selectedGalleryPaths.size === 0;
+  galleryDelete.textContent = "Удалить" + (selectedGalleryPaths.size ? " (" + selectedGalleryPaths.size + ")" : "");
+  gallerySelectedCount.hidden = !gallerySelectMode;
+  gallerySelectedCount.textContent = "Выбрано: " + selectedGalleryPaths.size;
+  for (const button of galleryGrid.querySelectorAll<HTMLButtonElement>(".gallery-card")) {
+    const selected = selectedGalleryPaths.has(button.dataset.path ?? "");
+    button.classList.toggle("selected", gallerySelectMode && selected);
+    if (gallerySelectMode) {
+      button.setAttribute("aria-pressed", String(selected));
+      button.setAttribute("aria-label", (selected ? "Снять выбор: " : "Выбрать: ") + (button.title || "изображение"));
+    } else {
+      button.removeAttribute("aria-pressed");
+      button.setAttribute("aria-label", "Открыть изображение " + (button.title || ""));
+    }
+  }
+}
+
+function setGallerySelectMode(enabled: boolean): void {
+  gallerySelectMode = enabled;
+  selectedGalleryPaths.clear();
+  hideGalleryContextMenu();
+  updateGallerySelection();
+}
+
 function showGalleryImage(item: GalleryImage): void {
   const image = element<HTMLImageElement>("full-image");
   image.removeAttribute("src");
   image.alt = item.fileName;
+  previewGalleryImage = item;
   image.onerror = () => {
     imageDialog.close();
     notify("Не удалось открыть изображение. Обновите галерею и попробуйте снова.");
@@ -594,7 +660,8 @@ function renderGalleryImage(item: GalleryImage): HTMLElement {
   const button = make("button", "gallery-card glass-surface");
   button.type = "button";
   button.title = item.fileName;
-  button.setAttribute("aria-label", `Открыть изображение ${item.fileName}`);
+  button.dataset.path = item.path;
+  button.setAttribute("aria-label", "Открыть изображение " + item.fileName);
   const image = make("img", "gallery-thumbnail");
   image.alt = item.fileName;
   image.loading = "lazy";
@@ -607,13 +674,31 @@ function renderGalleryImage(item: GalleryImage): HTMLElement {
     make("span", "gallery-file-name", item.fileName),
     make("span", "gallery-date", item.modifiedAt ? new Date(item.modifiedAt).toLocaleDateString("ru-RU") : "")
   );
-  button.append(image, caption);
-  button.addEventListener("click", () => showGalleryImage(item));
+  const selection = make("span", "gallery-selection", "✓");
+  selection.setAttribute("aria-hidden", "true");
+  button.append(image, caption, selection);
+  button.addEventListener("click", () => {
+    if (!gallerySelectMode) {
+      showGalleryImage(item);
+      return;
+    }
+    if (selectedGalleryPaths.has(item.path)) selectedGalleryPaths.delete(item.path);
+    else if (selectedGalleryPaths.size < 500) selectedGalleryPaths.add(item.path);
+    else { notify("За один раз можно удалить не более 500 изображений."); return; }
+    updateGallerySelection();
+  });
+  button.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    const rect = button.getBoundingClientRect();
+    showGalleryContextMenu(item, event.clientX || rect.left + 12, event.clientY || rect.top + 12);
+  });
   return button;
 }
 
 async function refreshGallery(): Promise<void> {
   const sequence = ++gallerySequence;
+  setGallerySelectMode(false);
+  gallerySelect.disabled = true;
   galleryRefresh.disabled = true;
   galleryStatus.hidden = false;
   galleryStatus.textContent = "Ищем изображения WebUI…";
@@ -622,7 +707,8 @@ async function refreshGallery(): Promise<void> {
   try {
     const images = await window.flow.listGalleryImages();
     if (sequence !== gallerySequence) return;
-    galleryCount.textContent = `${images.length} изображений`;
+    galleryImageCount = images.length;
+    galleryCount.textContent = images.length + " изображений";
     galleryStatus.hidden = true;
     galleryEmpty.hidden = images.length > 0;
     const fragment = document.createDocumentFragment();
@@ -630,9 +716,13 @@ async function refreshGallery(): Promise<void> {
     galleryGrid.append(fragment);
   } catch (error) {
     if (sequence !== gallerySequence) return;
-    galleryStatus.textContent = `Не удалось загрузить галерею: ${message(error)}`;
+    galleryImageCount = 0;
+    galleryStatus.textContent = "Не удалось загрузить галерею: " + message(error);
   } finally {
-    if (sequence === gallerySequence) galleryRefresh.disabled = false;
+    if (sequence === gallerySequence) {
+      gallerySelect.disabled = galleryImageCount === 0;
+      galleryRefresh.disabled = false;
+    }
   }
 }
 
@@ -958,6 +1048,56 @@ consoleCancel.addEventListener("click", async () => {
 });
 element<HTMLButtonElement>("close-image").addEventListener("click", () => imageDialog.close());
 galleryRefresh.addEventListener("click", () => void refreshGallery());
+gallerySelect.addEventListener("click", () => setGallerySelectMode(!gallerySelectMode));
+galleryDelete.addEventListener("click", () => {
+  if (selectedGalleryPaths.size === 0) return;
+  element<HTMLElement>("gallery-delete-message").textContent =
+    "Удалить " + selectedGalleryPaths.size + " изображений без возможности восстановления?";
+  galleryDeleteDialog.showModal();
+});
+element<HTMLButtonElement>("cancel-gallery-delete").addEventListener("click", () => galleryDeleteDialog.close());
+galleryDeleteConfirm.addEventListener("click", async () => {
+  const paths = [...selectedGalleryPaths];
+  if (paths.length === 0) { galleryDeleteDialog.close(); return; }
+  galleryDeleteConfirm.disabled = true;
+  try {
+    const count = await window.flow.deleteGalleryImages(paths);
+    notify("Удалено изображений: " + count);
+  } catch (error) {
+    notify("Не удалось удалить изображения: " + message(error));
+  } finally {
+    galleryDeleteConfirm.disabled = false;
+    galleryDeleteDialog.close();
+    await refreshGallery();
+  }
+});
+element<HTMLButtonElement>("copy-gallery-image").addEventListener("click", async () => {
+  const item = contextGalleryImage;
+  hideGalleryContextMenu();
+  if (!item) return;
+  try {
+    await window.flow.copyGalleryImage(item.path);
+    notify(item.fileName.toLowerCase().endsWith(".png") ? "PNG скопирован с параметрами. Вставьте его в PNG info через Ctrl+V." : "Изображение скопировано. Вставьте его в PNG info через Ctrl+V.");
+  } catch (error) {
+    notify("Не удалось скопировать изображение: " + message(error));
+  }
+});
+element<HTMLImageElement>("full-image").addEventListener("contextmenu", (event) => {
+  if (!previewGalleryImage) return;
+  event.preventDefault();
+  showGalleryContextMenu(previewGalleryImage, event.clientX, event.clientY);
+});
+imageDialog.addEventListener("close", () => {
+  previewGalleryImage = null;
+  hideGalleryContextMenu();
+});
+document.addEventListener("pointerdown", (event) => {
+  if (!galleryContextMenu.hidden && !galleryContextMenu.contains(event.target as Node)) hideGalleryContextMenu();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") hideGalleryContextMenu();
+});
+window.addEventListener("scroll", hideGalleryContextMenu, true);
 element<HTMLButtonElement>("search-button").addEventListener("click", () => void searchModels());
 searchInput.addEventListener("input", () => {
   window.clearTimeout(debounceTimer);

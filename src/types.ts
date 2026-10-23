@@ -132,6 +132,8 @@ export interface FlowAPI {
   checkXformers(): Promise<string>;
   installXformers(): Promise<void>;
   listGalleryImages(): Promise<GalleryImage[]>;
+  copyGalleryImage(path: string): Promise<void>;
+  deleteGalleryImages(paths: string[]): Promise<number>;
   searchModels(query: string): Promise<ModelSummary[]>;
   getStarterModel(key: string): Promise<StarterModel>;
   downloadModel(file: ModelFile, type: string, taskId: string, resume: boolean): Promise<void>;

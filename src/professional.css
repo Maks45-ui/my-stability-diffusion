@@ -235,3 +235,41 @@ button:active:not(:disabled) { transform: translateY(1px) !important; }
 @media (max-width: 760px) { .app-shell { --sidebar-expanded-width: 62px; } .content { padding: 18px; } .topbar { padding: 0 14px; } .sidebar.glass-surface { padding-inline: 7px; } }
 @media (max-width: 560px) { .runtime-connection .runtime-secondary { display: none; } .topbar-brand span { display: none; } .topbar { gap: 8px; } .first-run-model-grid { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { .runtime-dot, .online-dot { animation: none !important; } }
+
+/* Gallery selection and image actions. */
+.gallery-actions { flex-wrap: wrap; justify-content: flex-end; }
+.gallery-actions [hidden], .gallery-context-menu[hidden] { display: none !important; }
+.gallery-selected-count { color: var(--muted); font: 11px var(--font-mono); }
+.gallery-delete { color: var(--danger); border-color: var(--danger); }
+.gallery-delete:hover:not(:disabled) { color: var(--text); background: var(--danger); }
+.gallery-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.gallery-selection {
+  position: absolute; top: 10px; right: 10px; z-index: 2;
+  width: 23px; height: 23px; display: grid; place-items: center;
+  border: 1.5px solid #fff; border-radius: 50%;
+  background: rgba(17, 23, 32, .7); color: transparent;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .3);
+  opacity: 0; transform: scale(.8);
+  transition: opacity .16s ease-out, transform .16s ease-out, background-color .16s ease-out;
+  pointer-events: none;
+}
+.gallery-grid.selecting .gallery-selection { opacity: 1; transform: scale(1); }
+.gallery-card.selected .gallery-selection { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.gallery-context-menu {
+  position: fixed; z-index: 1000; min-width: 206px; padding: 5px;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-card);
+  background: var(--panel); color: var(--text);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, .27);
+}
+.image-modal .gallery-context-menu { position: absolute; }
+.gallery-context-menu button {
+  width: 100%; min-height: 35px; padding: 0 10px;
+  border: 0; border-radius: var(--radius-control); background: transparent;
+  color: var(--text); text-align: left; font-size: 12px; cursor: pointer;
+}
+.gallery-context-menu button:hover, .gallery-context-menu button:focus-visible { background: var(--accent-soft); }
+.gallery-delete-dialog { width: min(420px, calc(100% - 36px)); }
+.gallery-delete-confirm { background: var(--danger); }
+@media (prefers-reduced-motion: reduce) {
+  .gallery-selection { transition: none; }
+}

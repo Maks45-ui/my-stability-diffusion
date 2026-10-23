@@ -489,6 +489,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(Arc::new(installer::InstallControl::default()))
         .manage(installer::WebuiControl::default())
         .manage(Arc::new(civitai::DownloadControl::default()))
@@ -510,6 +511,8 @@ pub fn run() {
             get_webui_settings,
             save_webui_settings,
             gallery::list_gallery_images,
+            gallery::copy_gallery_image,
+            gallery::delete_gallery_images,
             set_page,
             installer::install_forge_neo_web_ui,
             installer::cancel_install,
