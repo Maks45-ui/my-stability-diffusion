@@ -191,7 +191,9 @@ pub(crate) fn models_library_dir(app: &AppHandle) -> Result<PathBuf, String> {
     if let Some(saved) = settings.models_library_dir {
         return Ok(paths::subprocess_path(&PathBuf::from(saved)));
     }
-    Ok(installation_dir(app)?.join("Flow Models"))
+    // The native A1111 models folder is the default shared library. This keeps
+    // existing downloads in place while Forge Neo can reference the same files.
+    Ok(installation_dir(app)?.join("sd-webui").join("models"))
 }
 
 #[tauri::command]

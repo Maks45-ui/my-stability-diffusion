@@ -617,14 +617,8 @@ fn install_local_clip(app: &AppHandle, control: &InstallControl, python: &Path, 
 fn only_preloaded_models(directory: &Path) -> Result<bool, String> {
     let entries = fs::read_dir(directory).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
     if entries.len() != 1 || entries[0].file_name().to_string_lossy() != "models" || !entries[0].file_type().map_err(|error| error.to_string())?.is_dir() { return Ok(false); }
-    let models = fs::read_dir(directory.join("models")).map_err(|error| error.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
-    if models.len() != 1 || models[0].file_name().to_string_lossy() != "Stable-diffusion" || !models[0].file_type().map_err(|error| error.to_string())?.is_dir() { return Ok(false); }
-    for entry in fs::read_dir(directory.join("models/Stable-diffusion")).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
-        if !entry.file_type().map_err(|error| error.to_string())?.is_file()
-            || !(name.ends_with(".safetensors") || name.ends_with(".ckpt") || name.ends_with(".flow-part") || name.ends_with(".flow-meta.json")) { return Ok(false); }
-    }
+    // Forge Neo may have already linked LoRA/VAE/etc. into the shared models
+    // folder before A1111 is installed. Keep all those files untouched.
     Ok(true)
 }
 
@@ -938,7 +932,8 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, inst
             arguments.push("--model-ref".to_owned());
             arguments.push(library.to_string_lossy().into_owned());
         }
-    } else if !arguments.iter().any(|arg| arg == "--ckpt-dir" || arg.starts_with("--ckpt-dir=")) {
+    } else if checkpoints != directory.join("models/Stable-diffusion")
+        && !arguments.iter().any(|arg| arg == "--ckpt-dir" || arg.starts_with("--ckpt-dir=")) {
         arguments.push("--ckpt-dir".to_owned());
         arguments.push(checkpoints.to_string_lossy().into_owned());
     }

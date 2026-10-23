@@ -218,7 +218,8 @@ fn run_maintenance(app: &AppHandle, control: &installer::InstallControl, package
         installer::run_logged(app, control, "git", &["fetch".into(), "--progress".into(), "origin".into(), branch.into()], &directory, None)?;
         let newest = git(app, &["-C".into(), dir.clone(), "rev-parse".into(), "FETCH_HEAD".into()])?;
         if newest == previous {
-            return Err("Пакет уже обновлён до последней доступной ревизии.".to_owned());
+            emit_task(app, TaskEvent { kind: "install", phase: "done", message: "Пакет уже обновлён до последней доступной ревизии.".to_owned(), url: None, percent: None, bytes_per_second: None, task_id: None, bytes_downloaded: None, total_bytes: None });
+            return Ok(());
         }
         // Keep the old object reachable even if the managed checkout is shallow.
         installer::run_logged(app, control, "git", &["update-ref".into(), "refs/flow/rollback".into(), previous.clone()], &directory, None)?;

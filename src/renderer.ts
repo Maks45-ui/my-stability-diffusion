@@ -72,7 +72,6 @@ let webuiControlBusy = false;
 let hasWebuiPackage = false;
 let webuiRunning = false;
 let installationDir = "";
-let modelsLibraryDir = "";
 let preflightSequence = 0;
 let activePackageId: PackageInfo["id"] = "automatic1111";
 let logFrame: number | undefined;
@@ -224,7 +223,7 @@ async function browseInstallationDir(): Promise<void> {
 
 async function browseModelsLibrary(): Promise<void> {
   try {
-    const selected = await window.flow.browseInstallationDirectory(modelsLibraryDir || installationDir);
+    const selected = await window.flow.browseInstallationDirectory(installationDir);
     if (!selected) return;
     await window.flow.saveModelsLibraryDirectory(selected);
     await refreshState();
@@ -403,7 +402,6 @@ function renderPackages(state: AppState): void {
   element<HTMLElement>("package-count").textContent = String(count);
   element<HTMLElement>("package-badge").textContent = `${count} ${count === 1 ? "пакет" : "пакетов"}`;
   element<HTMLElement>("models-path").textContent = state.modelsPath;
-  modelsLibraryDir = state.modelsLibraryDir;
   element<HTMLInputElement>("models-library-dir").value = state.modelsLibraryDir;
   element<HTMLElement>("token-state").textContent = state.hasCivitaiToken ? "Сохранён" : "Не задан";
   showInstallationDir(state.installationDir);
