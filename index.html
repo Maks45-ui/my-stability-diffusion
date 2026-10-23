@@ -49,7 +49,7 @@
           <div class="stat-row"><div class="stat-card glass-surface"><span class="stat-icon">▣</span><div><span>Установлено пакетов</span><strong id="package-count">0</strong></div></div><div class="stat-card glass-surface"><span class="stat-icon">◈</span><div><span>Каталог моделей</span><strong>Civitai</strong></div></div><div class="stat-card glass-surface"><span class="stat-icon">◉</span><div><span>Статус</span><strong id="system-status">Готов к работе</strong></div></div></div>
           <div class="home-grid">
             <section class="panel glass-surface library-panel"><div class="panel-heading"><div><span class="eyebrow">ВАША БИБЛИОТЕКА</span><h2>Установленные пакеты</h2></div><span class="badge" id="package-badge">0 пакетов</span></div><div id="package-list" class="package-list"></div></section>
-            <section class="panel glass-surface add-panel"><div class="add-art" aria-hidden="true"><span>＋</span></div><div class="add-copy"><span class="eyebrow">ПАКЕТЫ</span><h2>Новый пакет</h2><p>Установите AUTOMATIC1111 или подключите работающий Forge Neo из Stability Matrix.</p></div><button class="primary-button" id="add-package">Добавить пакет <span>→</span></button></section>
+            <section class="panel glass-surface add-panel"><div class="add-art" aria-hidden="true"><span>＋</span></div><div class="add-copy"><span class="eyebrow">ПАКЕТЫ</span><h2>Новый пакет</h2><p>Установите AUTOMATIC1111 или Forge Neo отдельно. Готовый пакет Forge Neo также можно подключить.</p></div><button class="primary-button" id="add-package">Добавить пакет <span>→</span></button></section>
           </div>
         </section>
 
@@ -81,7 +81,7 @@
             <form id="token-form" class="token-form"><input type="password" id="token-input" placeholder="Вставьте API-ключ" autocomplete="off" aria-label="Ключ Civitai API" /><button type="submit" class="secondary-button">Сохранить ключ</button></form>
             <div class="setting-row"><div><h2>Общая библиотека моделей</h2><p>Скачанные чекпоинты доступны AUTOMATIC1111 и пакетам Forge Neo, установленным через Flow, без копий.</p></div></div>
             <div class="path-control"><input id="models-library-dir" type="text" readonly aria-label="Общая папка моделей" /><button id="browse-models-library" class="secondary-button" type="button">Обзор...</button></div>
-            <p class="settings-note">Подключённый из Stability Matrix Forge Neo сохраняет свои пути моделей. Уже скачанные файлы Flow не переносит автоматически.</p>
+            <p class="settings-note">Подключённый из Stability Matrix Forge Neo сохраняет свои пути моделей. Существующие модели можно добавить через «Связать модели» без копирования файлов.</p>
             <div class="setting-row"><div><h2>Чекпоинты</h2><p id="models-path">Загрузка…</p></div></div>
             <div class="setting-row"><div><h2>Обновления Flow</h2><p id="flow-update-status">Проверка обновлений доступна вручную. Установщики предыдущих версий — на странице выпусков.</p></div><button id="check-flow-update" class="secondary-button" type="button">Проверить</button><button id="open-flow-releases" class="secondary-button" type="button">Выпуски</button></div>
           </div>

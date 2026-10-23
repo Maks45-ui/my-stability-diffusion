@@ -307,24 +307,46 @@ pub(crate) async fn link_package_models(app: AppHandle, package_id: String, down
     if downloads.is_running() { return Err("Дождитесь окончания загрузки модели.".to_owned()); }
     if crate::active_package(&app)? != package_id { return Err("Сначала выберите этот пакет.".to_owned()); }
     tauri::async_runtime::spawn_blocking(move || {
-        let source = crate::package_dir(&app)?.join("models/Stable-diffusion");
-        let destination = crate::models_library_dir(&app)?.join("Stable-diffusion");
+        let source = crate::package_dir(&app)?.join("models");
+        let destination = crate::models_library_dir(&app)?;
         if !source.is_dir() { return Err("В пакете ещё нет папки с чекпоинтами.".to_owned()); }
-        fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
-        if source.canonicalize().ok() == destination.canonicalize().ok() { return Ok("Пакет уже использует общую папку моделей.".to_owned()); }
-        let mut linked = 0;
-        let mut skipped = 0;
-        let mut failed = 0;
-        for item in fs::read_dir(source).map_err(|error| error.to_string())? {
-            let item = item.map_err(|error| error.to_string())?;
-            if !item.file_type().map_err(|error| error.to_string())?.is_file() { continue; }
-            let name = item.file_name();
-            let lower = name.to_string_lossy().to_ascii_lowercase();
-            if ![".safetensors", ".ckpt"].iter().any(|suffix| lower.ends_with(suffix)) { continue; }
-            let target = destination.join(name);
-            if target.exists() { skipped += 1; continue; }
-            match fs::hard_link(item.path(), target) { Ok(()) => linked += 1, Err(_) => failed += 1 }
-        }
-        Ok(format!("Связано без копирования: {linked}; имена уже заняты: {skipped}; не удалось: {failed}. Для жёстких ссылок папки должны быть на одном диске NTFS."))
+        let (linked, conflicts) = link_model_tree(&source, &destination)?;
+        Ok(format!("Связано без копирования: {linked}; совпадающие имена: {conflicts}. Для жёстких ссылок папки должны быть на одном диске NTFS."))
     }).await.map_err(|error| error.to_string())?
+}
+
+fn link_contents(source: &Path, destination: &Path, depth: usize, linked: &mut usize, conflicts: &mut usize) -> Result<(), String> {
+    if depth > 12 { return Err("Слишком глубокая структура папок моделей.".to_owned()); }
+    fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+    for item in fs::read_dir(source).map_err(|error| error.to_string())? {
+        let item = item.map_err(|error| error.to_string())?;
+        let kind = item.file_type().map_err(|error| error.to_string())?;
+        if kind.is_symlink() { continue; }
+        let target = destination.join(item.file_name());
+        if kind.is_dir() {
+            link_contents(&item.path(), &target, depth + 1, linked, conflicts)?;
+        } else if kind.is_file() {
+            let name = item.file_name().to_string_lossy().to_ascii_lowercase();
+            if name.ends_with(".flow-part") || name.ends_with(".flow-meta.json") { continue; }
+            if target.exists() { *conflicts += 1; continue; }
+            fs::hard_link(item.path(), target).map_err(|error| format!("Не удалось связать {}: {error}. Папки моделей должны быть на одном диске NTFS.", item.path().display()))?;
+            *linked += 1;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn link_model_tree(source: &Path, destination: &Path) -> Result<(usize, usize), String> {
+    if !source.is_dir() { return Ok((0, 0)); }
+    fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+    let source = source.canonicalize().map_err(|error| error.to_string())?;
+    let destination = destination.canonicalize().map_err(|error| error.to_string())?;
+    if source == destination { return Ok((0, 0)); }
+    if destination.starts_with(&source) || source.starts_with(&destination) {
+        return Err("Общая библиотека должна находиться отдельно от папки моделей пакета.".to_owned());
+    }
+    let mut linked = 0;
+    let mut conflicts = 0;
+    link_contents(&source, &destination, 0, &mut linked, &mut conflicts)?;
+    Ok((linked, conflicts))
 }

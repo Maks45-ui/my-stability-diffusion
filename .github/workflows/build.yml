@@ -13,7 +13,7 @@ jobs:
   windows:
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -42,12 +42,25 @@ jobs:
           name: Flow-Windows-Installer
           path: src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Flow-Windows-Installer
+          path: release
       - name: Publish versioned Windows installer
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: pwsh
         run: |
-          $files = @(Get-ChildItem -Path 'src-tauri/target/release/bundle/nsis' -Filter '*.exe' -File | ForEach-Object FullName)
-          if ($files.Count -eq 0) { throw 'Windows installer was not built.' }
-          gh release create $env:GITHUB_REF_NAME @files --generate-notes --title "Flow $env:GITHUB_REF_NAME"
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          test "$GITHUB_REF_NAME" = "v$version"
+          files=(release/*.exe)
+          test -f "${files[0]}"
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" --generate-notes --title "Flow $GITHUB_REF_NAME"

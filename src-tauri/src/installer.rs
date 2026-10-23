@@ -931,11 +931,14 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, inst
     if forge {
         // An imported Forge may already have its own model layout. Keep that layout intact.
         let managed = crate::installation_dir(&app)?.join("sd-webui-forge-neo");
-        if directory == managed && !arguments.iter().any(|arg| arg == "--model-ref") {
+        if directory == managed && !arguments.iter().any(|arg| arg == "--model-ref" || arg.starts_with("--model-ref=")) {
+            let (linked, conflicts) = crate::maintenance::link_model_tree(&directory.join("models"), &library)?;
+            if linked > 0 { notify_kind(&app, "launch", "log", format!("В общую библиотеку без копирования добавлено файлов: {linked}.")); }
+            if conflicts > 0 { notify_kind(&app, "launch", "log", format!("В общей библиотеке уже есть {conflicts} файлов с теми же именами. Проверьте их при необходимости.")); }
             arguments.push("--model-ref".to_owned());
             arguments.push(library.to_string_lossy().into_owned());
         }
-    } else if !arguments.iter().any(|arg| arg == "--ckpt-dir") {
+    } else if !arguments.iter().any(|arg| arg == "--ckpt-dir" || arg.starts_with("--ckpt-dir=")) {
         arguments.push("--ckpt-dir".to_owned());
         arguments.push(checkpoints.to_string_lossy().into_owned());
     }
