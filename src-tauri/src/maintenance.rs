@@ -5,6 +5,42 @@ use std::{fs, path::{Path, PathBuf}, process::{Command, Stdio}, sync::Arc};
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
+#[cfg(windows)]
+#[repr(C)]
+#[derive(Default)]
+struct MemoryStatus {
+    length: u32,
+    load: u32,
+    total_phys: u64,
+    avail_phys: u64,
+    total_page_file: u64,
+    avail_page_file: u64,
+    total_virtual: u64,
+    avail_virtual: u64,
+    avail_extended_virtual: u64,
+}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn GlobalMemoryStatusEx(status: *mut MemoryStatus) -> i32;
+    fn GetDiskFreeSpaceExW(path: *const u16, available: *mut u64, total: *mut u64, free: *mut u64) -> i32;
+}
+
+#[cfg(windows)]
+fn windows_resources(parent: &Path) -> Option<(f64, f64, f64, f64)> {
+    use std::os::windows::ffi::OsStrExt;
+    let mut memory = MemoryStatus { length: std::mem::size_of::<MemoryStatus>() as u32, ..Default::default() };
+    let path: Vec<u16> = parent.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let mut disk_available = 0_u64;
+    let memory_ok = unsafe { GlobalMemoryStatusEx(&mut memory) != 0 };
+    let disk_ok = unsafe { GetDiskFreeSpaceExW(path.as_ptr(), &mut disk_available, std::ptr::null_mut(), std::ptr::null_mut()) != 0 };
+    if !memory_ok || !disk_ok { return None; }
+    let gib = 1024.0 * 1024.0 * 1024.0;
+    Some((disk_available as f64 / gib, memory.total_phys as f64 / gib,
+        memory.avail_page_file as f64 / gib, memory.total_page_file as f64 / gib))
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CheckEntry {
@@ -62,22 +98,12 @@ fn environment_checks(parent: &Path, package_id: &str) -> Vec<CheckEntry> {
         checks.push(entry("Python/uv", if uv { "uv подготовит Python 3.13" } else if bootstrap { "Python 3.10 установит uv и Python 3.13" } else { "Нужен uv или Python 3.10 для подготовки Python 3.13" }, if uv || bootstrap { "ok" } else { "error" }));
     }
     #[cfg(windows)] {
-        let script = "$p=$env:FLOW_PREFLIGHT_PATH; $drive=[System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($p)); $os=Get-CimInstance Win32_OperatingSystem; @{ freeDiskGB=[math]::Round($drive.AvailableFreeSpace/1GB,1); ramGB=[math]::Round($os.TotalVisibleMemorySize/1MB,1); freeCommitGB=[math]::Round($os.FreeVirtualMemory/1MB,1); commitLimitGB=[math]::Round($os.TotalVirtualMemorySize/1MB,1) } | ConvertTo-Json -Compress";
-        let mut command = Command::new("powershell");
-        command.args(["-NoProfile", "-NonInteractive", "-Command", script])
-            .env("FLOW_PREFLIGHT_PATH", parent)
-            .stdin(Stdio::null());
-        installer::hide_console(&mut command);
-        let metrics = command.output().ok().filter(|output| output.status.success())
-            .and_then(|output| serde_json::from_slice::<Value>(&output.stdout).ok());
-        if let Some(metrics) = metrics {
-            let disk = metrics["freeDiskGB"].as_f64().unwrap_or(0.0);
+        if let Some((disk, ram, free_commit, limit)) = windows_resources(parent) {
             checks.push(entry("Свободно на диске", format!("{disk:.1} ГБ"), if disk < 5.0 { "error" } else if disk < 20.0 { "warning" } else { "ok" }));
-            let ram = metrics["ramGB"].as_f64().unwrap_or(0.0);
             checks.push(entry("Оперативная память", format!("{ram:.1} ГБ"), if ram < 8.0 { "warning" } else { "ok" }));
-            let free_commit = metrics["freeCommitGB"].as_f64().unwrap_or(0.0);
-            let limit = metrics["commitLimitGB"].as_f64().unwrap_or(0.0);
             checks.push(entry("Доступная виртуальная память", format!("{free_commit:.1} / {limit:.1} ГБ"), if free_commit < 10.0 { "warning" } else { "ok" }));
+            let pagefile = (limit - ram).max(0.0);
+            checks.push(entry("Файл подкачки", format!("≈ {pagefile:.1} ГБ выделено Windows"), if pagefile < 16.0 { "warning" } else { "ok" }));
         } else { checks.push(entry("Память и диск", "Не удалось прочитать системные показатели", "warning")); }
     }
     let gpu = quiet_output("nvidia-smi", &["--query-gpu=name,memory.total,driver_version", "--format=csv,noheader,nounits"], None);
@@ -194,6 +220,8 @@ fn run_maintenance(app: &AppHandle, control: &installer::InstallControl, package
         if newest == previous {
             return Err("Пакет уже обновлён до последней доступной ревизии.".to_owned());
         }
+        // Keep the old object reachable even if the managed checkout is shallow.
+        installer::run_logged(app, control, "git", &["update-ref".into(), "refs/flow/rollback".into(), previous.clone()], &directory, None)?;
         let snapshot = RollbackSnapshot { package_id: package_id.to_owned(), revision: previous.clone() };
         let file = rollback_file(app, package_id)?;
         fs::create_dir_all(file.parent().ok_or("Нет папки состояния обновлений")?).map_err(|error| error.to_string())?;
