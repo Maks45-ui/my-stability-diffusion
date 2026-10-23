@@ -22,7 +22,7 @@ const STATUS_TEXT: Record<DownloadStatus, string> = {
   pausing: "Приостанавливается",
   paused: "Пауза",
   cancelling: "Отменяется",
-  completed: "В папке WebUI",
+  completed: "В библиотеке",
   error: "Ошибка"
 };
 
@@ -285,12 +285,9 @@ export class DownloadManager {
 
   private async retry(item: DownloadItem): Promise<void> {
     try {
-      await this.api.deleteDownload(item.modelType, item.file.name);
       item.status = "queued";
-      item.percent = 0;
-      item.bytesDownloaded = 0;
       item.bytesPerSecond = 0;
-      item.resume = false;
+      item.resume = true;
       item.error = null;
       this.update(item);
       this.pump();

@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AppState, DownloadedFile, FlowAPI, GalleryImage, ModelFile, ModelSummary, PackageInfo, Page, StarterModel, TaskEvent, WebUISettings, WebUIStatus } from "./types";
+import type { AppState, CheckReport, DownloadedFile, FlowAPI, FlowUpdate, GalleryImage, ModelFile, ModelSummary, PackageInfo, Page, StarterModel, TaskEvent, WebUISettings, WebUIStatus } from "./types";
 
 // The UI only knows this typed contract. System access stays in Rust.
 export const flowApi: FlowAPI = {
@@ -37,6 +37,15 @@ export const flowApi: FlowAPI = {
   finishOnboarding: () => invoke<void>("finish_onboarding"),
   openCivitaiSite: () => invoke<void>("open_civitai_site"),
   saveInstallationDirectory: (directory: string) => invoke<void>("set_installation_dir", { directory }),
+  saveModelsLibraryDirectory: (directory: string) => invoke<void>("set_models_library_dir", { directory }),
+  getPreflight: (packageId: PackageInfo["id"]) => invoke<CheckReport>("get_preflight", { packageId }),
+  checkPackage: (packageId: PackageInfo["id"]) => invoke<CheckReport>("check_package", { packageId }),
+  repairPackage: (packageId: PackageInfo["id"]) => invoke<void>("repair_package", { packageId }),
+  updatePackage: (packageId: PackageInfo["id"]) => invoke<void>("update_package", { packageId }),
+  rollbackPackage: (packageId: PackageInfo["id"]) => invoke<void>("rollback_package", { packageId }),
+  checkFlowUpdate: () => invoke<FlowUpdate>("check_flow_update"),
+  openFlowReleases: () => invoke<void>("open_flow_releases"),
+  linkPackageModels: (packageId: PackageInfo["id"]) => invoke<string>("link_package_models", { packageId }),
   setPage: (page: Page) => invoke<void>("set_page", { page }),
   onTask: async (callback: (event: TaskEvent) => void) => listen<TaskEvent>("flow:task", (event) => callback(event.payload)),
   browseInstallationDirectory: async (currentPath: string) => {

@@ -11,6 +11,8 @@ export interface PackageInfo {
   stopped: boolean;
   readyUrl: string | null;
   active: boolean;
+  managed: boolean;
+  hasRollback: boolean;
 }
 
 export interface AppState {
@@ -18,6 +20,26 @@ export interface AppState {
   hasCivitaiToken: boolean;
   modelsPath: string;
   installationDir: string;
+  modelsLibraryDir: string;
+}
+
+export interface CheckEntry {
+  label: string;
+  value: string;
+  level: "ok" | "warning" | "error" | "info";
+}
+
+export interface CheckReport {
+  title: string;
+  checks: CheckEntry[];
+  canProceed: boolean;
+}
+
+export interface FlowUpdate {
+  currentVersion: string;
+  latestVersion: string | null;
+  available: boolean;
+  url: string;
 }
 
 export interface WebUIStatus {
@@ -40,6 +62,7 @@ export interface ModelFile {
   name: string;
   downloadUrl: string;
   sizeKb: number;
+  baseModel?: string | null;
 }
 
 export interface StarterModel {
@@ -88,6 +111,15 @@ export interface FlowAPI {
   installForgeNeo(installationDir: string): Promise<void>;
   browseInstallationDirectory(currentPath: string): Promise<string | null>;
   saveInstallationDirectory(directory: string): Promise<void>;
+  saveModelsLibraryDirectory(directory: string): Promise<void>;
+  getPreflight(packageId: PackageInfo["id"]): Promise<CheckReport>;
+  checkPackage(packageId: PackageInfo["id"]): Promise<CheckReport>;
+  repairPackage(packageId: PackageInfo["id"]): Promise<void>;
+  updatePackage(packageId: PackageInfo["id"]): Promise<void>;
+  rollbackPackage(packageId: PackageInfo["id"]): Promise<void>;
+  checkFlowUpdate(): Promise<FlowUpdate>;
+  openFlowReleases(): Promise<void>;
+  linkPackageModels(packageId: PackageInfo["id"]): Promise<string>;
   cancelInstall(): Promise<void>;
   launchWebUI(packageId?: PackageInfo["id"]): Promise<void>;
   registerForgeNeo(directory: string): Promise<void>;

@@ -67,6 +67,13 @@ impl InstallControl {
     pub(crate) fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
     }
+    pub(crate) fn try_start(&self) -> Result<(), String> {
+        if self.running.swap(true, Ordering::SeqCst) { return Err("Установка или обслуживание уже выполняется.".to_owned()); }
+        self.cancelled.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+    pub(crate) fn finish(&self) { self.running.store(false, Ordering::SeqCst); }
+    pub(crate) fn was_cancelled(&self) -> bool { self.cancelled.load(Ordering::SeqCst) }
 }
 
 #[derive(Default, Clone)]
@@ -127,7 +134,7 @@ fn notify(app: &AppHandle, phase: &'static str, message: impl Into<String>) {
     notify_kind(app, "install", phase, message);
 }
 
-fn hide_console(command: &mut Command) {
+pub(crate) fn hide_console(command: &mut Command) {
     #[cfg(windows)] {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -152,7 +159,7 @@ fn emit_output(app: &AppHandle, output: &[u8]) {
     }
 }
 
-fn command_output(app: &AppHandle, program: &str, args: &[String]) -> Result<String, String> {
+pub(crate) fn command_output(app: &AppHandle, program: &str, args: &[String]) -> Result<String, String> {
     let mut command = Command::new(program);
     command.args(args).stdin(Stdio::null());
     hide_console(&mut command);
@@ -388,7 +395,7 @@ fn run_logged_kind(app: &AppHandle, control: &InstallControl, kind: &'static str
     Ok(())
 }
 
-fn run_logged(app: &AppHandle, control: &InstallControl, program: &str, args: &[String], cwd: &Path, locked_file: Option<Arc<AtomicBool>>) -> Result<(), String> {
+pub(crate) fn run_logged(app: &AppHandle, control: &InstallControl, program: &str, args: &[String], cwd: &Path, locked_file: Option<Arc<AtomicBool>>) -> Result<(), String> {
     run_logged_kind(app, control, "install", program, args, cwd, locked_file, &[])
 }
 
@@ -621,7 +628,7 @@ fn only_preloaded_models(directory: &Path) -> Result<bool, String> {
     Ok(true)
 }
 
-fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(), String> {
+pub(crate) fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(), String> {
     notify(app, "checking", "Проверка Git и Python 3.10…");
     command_output(app, "git", &["--version".to_owned()]).map_err(|_| "Git не найден. Установите Git и перезапустите Flow.".to_owned())?;
     let (python, prefix) = python_310(app)?;
@@ -629,8 +636,9 @@ fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(
     notify(app, "cloning", format!("Папка пакета: {}", directory.display()));
     if directory.exists() {
         if !directory.join(".git").is_dir() {
-            if !only_preloaded_models(&directory)? { return Err("Папка sd-webui занята другим содержимым.".to_owned()); }
-            notify(app, "cloning", "Модели уже загружены; добавляю файлы WebUI в эту папку.");
+            let empty = fs::read_dir(&directory).map_err(|error| error.to_string())?.next().is_none();
+            if !empty && !only_preloaded_models(&directory)? { return Err("Папка sd-webui занята другим содержимым.".to_owned()); }
+            notify(app, "cloning", "Продолжаю подготовку репозитория WebUI.");
             run_logged(app, control, "git", &["init".to_owned()], &directory, None)?;
             run_logged(app, control, "git", &["remote".to_owned(), "add".to_owned(), "origin".to_owned(), WEBUI_REPO.to_owned()], &directory, None)?;
         }
@@ -644,7 +652,11 @@ fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(
             run_logged(app, control, "git", &["checkout".to_owned(), "--detach".to_owned(), "FETCH_HEAD".to_owned()], &directory, None)?;
         }
     } else {
-        run_logged(app, control, "git", &["clone".to_owned(), "--progress".to_owned(), WEBUI_REPO.to_owned(), directory.to_string_lossy().into_owned()], parent, None)?;
+        fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+        run_logged(app, control, "git", &["init".to_owned()], &directory, None)?;
+        run_logged(app, control, "git", &["remote".to_owned(), "add".to_owned(), "origin".to_owned(), WEBUI_REPO.to_owned()], &directory, None)?;
+        run_logged(app, control, "git", &["fetch".to_owned(), "--progress".to_owned(), "--depth".to_owned(), "1".to_owned(), "origin".to_owned(), "HEAD".to_owned()], &directory, None)?;
+        run_logged(app, control, "git", &["checkout".to_owned(), "--detach".to_owned(), "FETCH_HEAD".to_owned()], &directory, None)?;
     }
     let venv = directory.join("venv");
     let venv_python = if cfg!(windows) { venv.join("Scripts").join("python.exe") } else { venv.join("bin").join("python") };
@@ -680,7 +692,7 @@ fn install(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(
     Ok(())
 }
 
-fn install_forge_neo(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(), String> {
+pub(crate) fn install_forge_neo(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(), String> {
     notify(app, "checking", "Проверка Git для Forge Neo…");
     command_output(app, "git", &["--version".to_owned()])
         .map_err(|_| "Git не найден. Установите Git и перезапустите Flow.".to_owned())?;
@@ -688,7 +700,11 @@ fn install_forge_neo(app: &AppHandle, control: &InstallControl, parent: &Path) -
     notify(app, "cloning", format!("Forge Neo будет установлен отдельно: {}", directory.display()));
     if directory.exists() {
         if !directory.join(".git").is_dir() {
-            return Err("Папка sd-webui-forge-neo уже занята. Выберите другую папку установки или освободите её.".to_owned());
+            if fs::read_dir(&directory).map_err(|error| error.to_string())?.next().is_some() {
+                return Err("Папка sd-webui-forge-neo уже занята. Выберите другую папку установки или освободите её.".to_owned());
+            }
+            run_logged(app, control, "git", &["init".to_owned()], &directory, None)?;
+            run_logged(app, control, "git", &["remote".to_owned(), "add".to_owned(), "origin".to_owned(), FORGE_NEO_REPO.to_owned()], &directory, None)?;
         }
         let path = directory.to_string_lossy().into_owned();
         let remote = command_output(app, "git", &["-C".to_owned(), path.clone(), "remote".to_owned(), "get-url".to_owned(), "origin".to_owned()])?;
@@ -696,21 +712,25 @@ fn install_forge_neo(app: &AppHandle, control: &InstallControl, parent: &Path) -
             return Err("В папке sd-webui-forge-neo находится другой Git-репозиторий.".to_owned());
         }
         let branch = command_output(app, "git", &["-C".to_owned(), path.clone(), "branch".to_owned(), "--show-current".to_owned()])?;
-        if branch != "neo" { return Err("Существующий Forge-репозиторий находится не на ветке neo.".to_owned()); }
+        if branch != "neo" && !branch.is_empty() { return Err("Существующий Forge-репозиторий находится не на ветке neo.".to_owned()); }
         if !directory.join("launch.py").is_file() || !directory.join("modules_forge").is_dir() {
             let changes = command_output(app, "git", &["-C".to_owned(), path, "status".to_owned(), "--porcelain".to_owned()])?;
             if !changes.is_empty() { return Err("В неполной папке Forge Neo есть локальные изменения. Сохраните их перед повторной установкой.".to_owned()); }
             notify(app, "cloning", "Продолжаю прерванное скачивание Forge Neo…");
             run_logged(app, control, "git", &["fetch".to_owned(), "--depth".to_owned(), "1".to_owned(), "origin".to_owned(), "neo".to_owned()], &directory, None)?;
-            run_logged(app, control, "git", &["reset".to_owned(), "--hard".to_owned(), "FETCH_HEAD".to_owned()], &directory, None)?;
+            if branch.is_empty() {
+                run_logged(app, control, "git", &["checkout".to_owned(), "-B".to_owned(), "neo".to_owned(), "FETCH_HEAD".to_owned()], &directory, None)?;
+            } else {
+                run_logged(app, control, "git", &["reset".to_owned(), "--hard".to_owned(), "FETCH_HEAD".to_owned()], &directory, None)?;
+            }
         }
         notify(app, "cloning", "Найден ранее скачанный Forge Neo; продолжаю установку.");
     } else {
-        run_logged(app, control, "git", &[
-            "clone".to_owned(), "--progress".to_owned(), "--depth".to_owned(), "1".to_owned(),
-            "--single-branch".to_owned(), "--branch".to_owned(), "neo".to_owned(),
-            FORGE_NEO_REPO.to_owned(), directory.to_string_lossy().into_owned(),
-        ], parent, None)?;
+        fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+        run_logged(app, control, "git", &["init".to_owned()], &directory, None)?;
+        run_logged(app, control, "git", &["remote".to_owned(), "add".to_owned(), "origin".to_owned(), FORGE_NEO_REPO.to_owned()], &directory, None)?;
+        run_logged(app, control, "git", &["fetch".to_owned(), "--progress".to_owned(), "--depth".to_owned(), "1".to_owned(), "origin".to_owned(), "neo".to_owned()], &directory, None)?;
+        run_logged(app, control, "git", &["checkout".to_owned(), "-B".to_owned(), "neo".to_owned(), "FETCH_HEAD".to_owned()], &directory, None)?;
     }
     if !directory.join("launch.py").is_file() || !directory.join("modules_forge").is_dir() {
         return Err("В скачанном репозитории Forge Neo не найдены файлы запуска.".to_owned());
@@ -905,6 +925,20 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, inst
     let python = venv_python(&directory);
     if !python.is_file() { return Err("Виртуальное окружение WebUI не найдено.".to_owned()); }
     let mut arguments = parse_webui_arguments(&crate::webui_arguments(&app)?)?;
+    let library = crate::models_library_dir(&app)?;
+    let checkpoints = library.join("Stable-diffusion");
+    fs::create_dir_all(&checkpoints).map_err(|error| format!("Не удалось подготовить общую библиотеку моделей: {error}"))?;
+    if forge {
+        // An imported Forge may already have its own model layout. Keep that layout intact.
+        let managed = crate::installation_dir(&app)?.join("sd-webui-forge-neo");
+        if directory == managed && !arguments.iter().any(|arg| arg == "--model-ref") {
+            arguments.push("--model-ref".to_owned());
+            arguments.push(library.to_string_lossy().into_owned());
+        }
+    } else if !arguments.iter().any(|arg| arg == "--ckpt-dir") {
+        arguments.push("--ckpt-dir".to_owned());
+        arguments.push(checkpoints.to_string_lossy().into_owned());
+    }
     let detected_vram = nvidia_vram_mib();
     let memory_profile = !forge && apply_memory_flags(&mut arguments, crate::sdxl_memory_profile(&app)?, detected_vram);
     if memory_profile {

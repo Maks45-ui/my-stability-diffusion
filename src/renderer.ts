@@ -3,7 +3,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { DownloadManager } from "./download-manager";
 import { FirstRunController } from "./onboarding";
 import { ThemeController } from "./theme";
-import type { AppState, GalleryImage, ModelSummary, PackageInfo, Page, TaskEvent } from "./types";
+import type { AppState, CheckReport, GalleryImage, ModelSummary, PackageInfo, Page, TaskEvent } from "./types";
 
 window.flow = flowApi;
 
@@ -72,6 +72,8 @@ let webuiControlBusy = false;
 let hasWebuiPackage = false;
 let webuiRunning = false;
 let installationDir = "";
+let modelsLibraryDir = "";
+let preflightSequence = 0;
 let activePackageId: PackageInfo["id"] = "automatic1111";
 let logFrame: number | undefined;
 let terminalHasOutput = false;
@@ -179,6 +181,34 @@ function showInstallationDir(path: string): void {
   element<HTMLInputElement>("install-dir-dialog").value = path;
 }
 
+function renderChecks(target: HTMLElement, report: CheckReport): void {
+  target.replaceChildren();
+  for (const check of report.checks) {
+    const row = make("div", "check-row");
+    row.dataset.level = check.level;
+    row.append(make("strong", "", check.label), make("span", "", check.value));
+    target.append(row);
+  }
+}
+
+async function refreshPreflight(): Promise<void> {
+  const request = ++preflightSequence;
+  const target = element<HTMLElement>("preflight-checks");
+  const importForge = installPackageType.value === "forge-neo-import";
+  target.parentElement!.hidden = importForge;
+  if (importForge) return;
+  target.textContent = "Проверяем окружение…";
+  const packageId: PackageInfo["id"] = installPackageType.value === "forge-neo-install" ? "forge-neo" : "automatic1111";
+  try {
+    const report = await window.flow.getPreflight(packageId);
+    if (request !== preflightSequence || !installDialog.open) return;
+    renderChecks(target, report);
+    element<HTMLButtonElement>("start-install").disabled = !report.canProceed;
+  } catch (error) {
+    if (request === preflightSequence) target.textContent = message(error);
+  }
+}
+
 async function browseInstallationDir(): Promise<void> {
   try {
     const selected = await window.flow.browseInstallationDirectory(installationDir);
@@ -187,8 +217,52 @@ async function browseInstallationDir(): Promise<void> {
     await window.flow.saveInstallationDirectory(selected);
     // get_state returns the Windows path without the verbatim namespace prefix.
     await refreshState();
+    if (installDialog.open) void refreshPreflight();
     await downloadManager.restore();
   } catch (error) { notify(message(error)); }
+}
+
+async function browseModelsLibrary(): Promise<void> {
+  try {
+    const selected = await window.flow.browseInstallationDirectory(modelsLibraryDir || installationDir);
+    if (!selected) return;
+    await window.flow.saveModelsLibraryDirectory(selected);
+    await refreshState();
+    await downloadManager.restore();
+    notify("Общая папка моделей сохранена. Новые загрузки пойдут туда.");
+  } catch (error) { notify(message(error)); }
+}
+
+async function runPackageMaintenance(item: PackageInfo, action: "repair" | "update" | "rollback"): Promise<void> {
+  if (installing) return;
+  installingPackageId = item.id;
+  setInstalling(true);
+  setConsoleVisible(true);
+  setConsoleStatus("Обслуживание пакета", "running");
+  queueLog(terminal, `[Пакет] ${item.name}: ${action}`);
+  try {
+    if (action === "repair") await window.flow.repairPackage(item.id);
+    else if (action === "update") await window.flow.updatePackage(item.id);
+    else await window.flow.rollbackPackage(item.id);
+  } catch (error) {
+    setInstalling(false);
+    setConsoleStatus("Ошибка обслуживания", "error");
+    queueLog(terminal, `[Пакет] ${message(error)}`);
+    notify(message(error));
+  }
+}
+
+async function showPackageHealth(item: PackageInfo): Promise<void> {
+  const dialog = element<HTMLDialogElement>("health-dialog");
+  element<HTMLElement>("health-title").textContent = `Проверка ${item.name}`;
+  element<HTMLElement>("health-checks").textContent = "Проверяем файлы, окружение и память…";
+  dialog.showModal();
+  try {
+    const report = await window.flow.checkPackage(item.id);
+    if (dialog.open) renderChecks(element<HTMLElement>("health-checks"), report);
+  } catch (error) {
+    if (dialog.open) element<HTMLElement>("health-checks").textContent = message(error);
+  }
 }
 
 function message(error: unknown): string {
@@ -329,6 +403,8 @@ function renderPackages(state: AppState): void {
   element<HTMLElement>("package-count").textContent = String(count);
   element<HTMLElement>("package-badge").textContent = `${count} ${count === 1 ? "пакет" : "пакетов"}`;
   element<HTMLElement>("models-path").textContent = state.modelsPath;
+  modelsLibraryDir = state.modelsLibraryDir;
+  element<HTMLInputElement>("models-library-dir").value = state.modelsLibraryDir;
   element<HTMLElement>("token-state").textContent = state.hasCivitaiToken ? "Сохранён" : "Не задан";
   showInstallationDir(state.installationDir);
   if (count === 0) {
@@ -397,6 +473,41 @@ function renderPackages(state: AppState): void {
       } catch (error) { notify(message(error)); }
     });
     actions.append(launch, open, stop, settings);
+    const linkModels = make("button", "secondary-button", "Связать модели");
+    linkModels.type = "button";
+    linkModels.title = "Добавить существующие чекпоинты в общую библиотеку без копирования (только один диск NTFS)";
+    linkModels.addEventListener("click", async () => {
+      linkModels.disabled = true;
+      try {
+        if (activePackageId !== item.id) await window.flow.selectPackage(item.id);
+        activePackageId = item.id;
+        notify(await window.flow.linkPackageModels(item.id));
+        await downloadManager.restore();
+        await refreshState();
+      } catch (error) { notify(message(error)); linkModels.disabled = false; }
+    });
+    actions.append(linkModels);
+    if (item.managed) {
+      const check = make("button", "secondary-button", "Проверить");
+      check.type = "button";
+      check.addEventListener("click", () => void showPackageHealth(item));
+      const repair = make("button", "secondary-button", "Исправить");
+      repair.type = "button";
+      repair.disabled = item.running || installing;
+      repair.addEventListener("click", () => void runPackageMaintenance(item, "repair"));
+      const update = make("button", "secondary-button", "Обновить");
+      update.type = "button";
+      update.disabled = item.running || installing;
+      update.addEventListener("click", () => void runPackageMaintenance(item, "update"));
+      actions.append(check, repair, update);
+      if (item.hasRollback) {
+        const rollback = make("button", "secondary-button", "Откатить");
+        rollback.type = "button";
+        rollback.disabled = item.running || installing;
+        rollback.addEventListener("click", () => void runPackageMaintenance(item, "rollback"));
+        actions.append(rollback);
+      }
+    }
     card.append(actions);
     packageList.append(card);
   }
@@ -567,7 +678,7 @@ function renderModel(model: ModelSummary): HTMLElement {
     const select = make("select", "file-select");
     select.setAttribute("aria-label", `Файл модели ${model.name}`);
     for (const [index, file] of model.files.entries()) {
-      const option = make("option", "", file.name);
+      const option = make("option", "", file.baseModel ? `${file.name} · ${file.baseModel}` : file.name);
       option.value = String(index);
       select.append(option);
     }
@@ -578,7 +689,17 @@ function renderModel(model: ModelSummary): HTMLElement {
       if (!file) return;
       downloadManager.enqueue(file, model.type, model.name);
     });
+    const compatibility = make("small", "model-compatibility");
+    const describe = (): void => {
+      const base = model.files[Number(select.value)]?.baseModel ?? "";
+      compatibility.textContent = base.toLowerCase().includes("sdxl") || base.toLowerCase().includes("illustrious")
+        ? `${base}: Forge Neo рекомендуется для видеокарт с малой VRAM.`
+        : base ? `${base}: проверьте поддержку архитектуры выбранным WebUI.` : "Архитектура файла не указана в Civitai.";
+    };
+    select.addEventListener("change", describe);
+    describe();
     footer.append(select, button);
+    body.append(compatibility);
   } else footer.append(make("span", "muted", "Файлы недоступны"));
   body.append(footer);
   card.append(gallery, body);
@@ -714,7 +835,7 @@ menuToggle.addEventListener("click", () => {
 });
 element<HTMLButtonElement>("add-package").addEventListener("click", () => {
   if (installing) setConsoleVisible(true);
-  else installDialog.showModal();
+  else { installDialog.showModal(); void refreshPreflight(); }
 });
 installPackageType.addEventListener("change", () => {
   const importForge = installPackageType.value === "forge-neo-import";
@@ -730,6 +851,8 @@ installPackageType.addEventListener("change", () => {
       ? "Flow скачает ветку Forge Neo, подготовит Python 3.13 в отдельном окружении и установит зависимости. Ход установки появится в консоли."
       : "Flow проверит Git и Python 3.10, загрузит WebUI и создаст отдельное окружение. Логи откроются при запуске установки.";
   element<HTMLButtonElement>("start-install").textContent = importForge ? "Подключить Forge Neo" : "Начать установку";
+  element<HTMLButtonElement>("start-install").disabled = !importForge;
+  void refreshPreflight();
 });
 element<HTMLButtonElement>("browse-forge-dialog").addEventListener("click", async () => {
   try {
@@ -865,6 +988,19 @@ searchInput.addEventListener("input", () => {
 searchInput.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); void searchModels(); } });
 element<HTMLButtonElement>("browse-install-settings").addEventListener("click", () => void browseInstallationDir());
 element<HTMLButtonElement>("browse-install-dialog").addEventListener("click", () => void browseInstallationDir());
+element<HTMLButtonElement>("browse-models-library").addEventListener("click", () => void browseModelsLibrary());
+element<HTMLButtonElement>("close-health").addEventListener("click", () => element<HTMLDialogElement>("health-dialog").close());
+element<HTMLButtonElement>("health-close").addEventListener("click", () => element<HTMLDialogElement>("health-dialog").close());
+element<HTMLButtonElement>("check-flow-update").addEventListener("click", async () => {
+  const status = element<HTMLElement>("flow-update-status");
+  status.textContent = "Проверяем выпуски…";
+  try {
+    const update = await window.flow.checkFlowUpdate();
+    status.textContent = update.available ? `Доступна версия ${update.latestVersion} (установлена ${update.currentVersion}). Откройте «Выпуски» для установки.`
+      : update.latestVersion ? `Установлена актуальная версия ${update.currentVersion}.` : "Опубликованных выпусков пока нет.";
+  } catch (error) { status.textContent = `Не удалось проверить: ${message(error)}`; }
+});
+element<HTMLButtonElement>("open-flow-releases").addEventListener("click", () => void window.flow.openFlowReleases().catch((error: unknown) => notify(message(error))));
 element<HTMLButtonElement>("theme-toggle").addEventListener("click", () => {
   showPage("settings");
   element<HTMLElement>("theme-picker").scrollIntoView({ behavior: "smooth", block: "start" });

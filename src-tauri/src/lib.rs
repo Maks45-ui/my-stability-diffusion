@@ -3,6 +3,7 @@ mod discord;
 mod gallery;
 mod installer;
 mod paths;
+mod maintenance;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -17,6 +18,8 @@ struct Settings {
     civitai_token: String,
     #[serde(default)]
     installation_dir: Option<String>,
+    #[serde(default)]
+    models_library_dir: Option<String>,
     #[serde(default)]
     forge_neo_dir: Option<String>,
     #[serde(default)]
@@ -47,6 +50,7 @@ struct AppState {
     has_civitai_token: bool,
     models_path: String,
     installation_dir: String,
+    models_library_dir: String,
 }
 
 #[derive(Serialize)]
@@ -61,6 +65,8 @@ struct PackageInfo {
     stopped: bool,
     ready_url: Option<String>,
     active: bool,
+    managed: bool,
+    has_rollback: bool,
 }
 
 #[derive(Serialize)]
@@ -180,6 +186,25 @@ pub(crate) fn installation_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(paths::subprocess_path(&default))
 }
 
+pub(crate) fn models_library_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let settings = read_settings(app)?;
+    if let Some(saved) = settings.models_library_dir {
+        return Ok(paths::subprocess_path(&PathBuf::from(saved)));
+    }
+    Ok(installation_dir(app)?.join("Flow Models"))
+}
+
+#[tauri::command]
+fn set_models_library_dir(app: AppHandle, directory: String, webui: State<'_, installer::WebuiControl>, downloads: State<'_, Arc<civitai::DownloadControl>>) -> Result<(), String> {
+    if webui.is_running() || downloads.is_running() { return Err("Остановите WebUI и загрузку моделей перед сменой библиотеки.".to_owned()); }
+    let path = paths::subprocess_path(&PathBuf::from(directory.trim()));
+    if !path.is_absolute() || !path.is_dir() { return Err("Выберите существующую абсолютную папку для моделей.".to_owned()); }
+    let path = paths::subprocess_path(&path.canonicalize().map_err(|error| error.to_string())?);
+    let mut settings = read_settings(&app)?;
+    settings.models_library_dir = Some(path.to_string_lossy().into_owned());
+    write_settings(&app, &settings)
+}
+
 pub(crate) fn active_package(app: &AppHandle) -> Result<String, String> {
     let saved = read_settings(app)?.active_package;
     Ok(if saved == "forge-neo" { saved } else { "automatic1111".to_owned() })
@@ -249,6 +274,8 @@ fn get_state(app: AppHandle, webui: State<'_, installer::WebuiControl>) -> Resul
             stopped: webui.was_stopped() && webui.package_id().as_deref() == Some("automatic1111"),
             ready_url: if running { webui.ready_url() } else { None },
             active: settings.active_package != "forge-neo",
+            managed: true,
+            has_rollback: maintenance::has_rollback(&app, "automatic1111"),
         });
     }
     if let Some(path) = settings.forge_neo_dir {
@@ -268,6 +295,8 @@ fn get_state(app: AppHandle, webui: State<'_, installer::WebuiControl>) -> Resul
                 stopped: webui.was_stopped() && webui.package_id().as_deref() == Some("forge-neo"),
                 ready_url: if running { webui.ready_url() } else { None },
                 active: settings.active_package == "forge-neo",
+                managed: directory == parent.join("sd-webui-forge-neo") && directory.join(".flow-installed.json").is_file(),
+                has_rollback: maintenance::has_rollback(&app, "forge-neo"),
             });
         }
     }
@@ -277,6 +306,7 @@ fn get_state(app: AppHandle, webui: State<'_, installer::WebuiControl>) -> Resul
         has_civitai_token: !token.is_empty(),
         models_path: civitai::models_directory(&app)?.to_string_lossy().into_owned(),
         installation_dir: parent.to_string_lossy().into_owned(),
+        models_library_dir: models_library_dir(&app)?.to_string_lossy().into_owned(),
     })
 }
 
@@ -464,6 +494,7 @@ pub fn run() {
             get_state,
             get_webui_status,
             set_installation_dir,
+            set_models_library_dir,
             register_forge_neo,
             select_package,
             save_civitai_token,
@@ -486,6 +517,14 @@ pub fn run() {
             installer::open_web_ui,
             installer::check_xformers,
             installer::install_xformers,
+            maintenance::get_preflight,
+            maintenance::check_package,
+            maintenance::repair_package,
+            maintenance::update_package,
+            maintenance::rollback_package,
+            maintenance::check_flow_update,
+            maintenance::open_flow_releases,
+            maintenance::link_package_models,
             civitai::search_models,
             civitai::get_starter_model,
             civitai::download_model,

@@ -2,7 +2,7 @@
 .glass-surface {
   position: relative;
   border: 1px solid var(--border-subtle);
-  border-radius: 0;
+  border-radius: var(--radius-card);
   background: var(--panel);
   box-shadow: none;
   -webkit-backdrop-filter: none;
@@ -16,8 +16,8 @@
 .sidebar.glass-surface {
   z-index: 2;
   flex-shrink: 0;
-  border-width: 0 1px 0 0;
-  border-radius: 0;
+  border-width: 1px;
+  border-radius: var(--radius-panel);
   background: var(--sidebar);
   transition: width .18s ease-out, background-color .18s ease-out, border-color .18s ease-out;
 }
@@ -31,7 +31,7 @@
 
 .modal.glass-surface {
   border: 1px solid var(--border-subtle);
-  border-radius: 0;
+  border-radius: var(--radius-panel);
   background: var(--modal-bg);
   box-shadow: 0 20px 50px rgba(0, 0, 0, .22);
 }

@@ -1,5 +1,5 @@
-/* Professional UI layer: compact hierarchy, sharp geometry, restrained motion. */
-*, *::before, *::after { border-radius: 0 !important; }
+/* Professional UI layer: compact hierarchy and restrained motion. */
+:root { --radius-control: 9px; --radius-card: 14px; --radius-panel: 18px; }
 html, body { font-family: var(--font-ui); font-size: 13px; letter-spacing: 0; }
 body { color: var(--text-primary); background: var(--bg); }
 ::selection { background: var(--accent-soft); color: var(--text); }
@@ -9,8 +9,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 }
 button:active:not(:disabled) { transform: translateY(1px) !important; }
 
-.app-shell { --sidebar-expanded-width: 208px; --sidebar-collapsed-width: 62px; background: var(--bg); }
-.main { background: var(--bg); }
+.app-shell { --sidebar-expanded-width: 208px; --sidebar-collapsed-width: 62px; gap: 8px; padding: 8px; background: var(--bg); }
+.main { min-width: 0; overflow: hidden; border-radius: var(--radius-panel); background: var(--bg); }
 .content { padding: 24px 28px 32px; }
 .page { animation: page-in .18s ease-out both; }
 @keyframes page-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
@@ -24,7 +24,7 @@ button:active:not(:disabled) { transform: translateY(1px) !important; }
 .icon-button { width: 32px; height: 32px; color: var(--muted); font-size: 18px; transition: color .16s ease-out, background-color .16s ease-out; }
 .icon-button:hover { background: var(--surface); color: var(--text); transform: none; }
 .navigation { gap: 3px; }
-.nav-indicator { left: 0; right: auto; width: 2px; height: 40px; background: var(--accent); box-shadow: none; transition: transform .18s ease-out, height .18s ease-out; }
+.nav-indicator { left: 0; right: auto; width: 3px; height: 40px; border-radius: 999px; background: var(--accent); box-shadow: none; transition: transform .18s ease-out, height .18s ease-out; }
 .nav-item { height: 40px; gap: 10px; padding: 0 11px; color: var(--muted); font-size: 12px; font-weight: 560; transition: color .16s ease-out, background-color .16s ease-out; }
 .nav-item:hover { color: var(--text); background: var(--nav-hover); transform: none; }
 .nav-item.active, .nav-item.active:hover { color: var(--text); background: var(--accent-soft); font-weight: 650; }
@@ -181,7 +181,7 @@ button:active:not(:disabled) { transform: translateY(1px) !important; }
 .first-run-header { gap: 11px; padding-bottom: 15px; border-bottom: 1px solid var(--border-subtle); }
 .first-run-header img { width: 31px; height: 31px; filter: none; }
 .first-run-dialog > p { margin: 14px 0 18px; font-size: 12px; }
-.first-run-steps { gap: 0; border: 1px solid var(--border-subtle); }
+.first-run-steps { gap: 0; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); }
 .first-run-steps li { gap: 11px; padding: 11px 12px; border: 0; border-bottom: 1px solid var(--border-subtle); background: var(--panel); }
 .first-run-steps li:last-child { border-bottom: 0; }
 .first-run-step-number { width: 23px; height: 23px; background: var(--surface); color: var(--text-subtle); font: 11px var(--font-mono); }
@@ -210,6 +210,20 @@ button:active:not(:disabled) { transform: translateY(1px) !important; }
 .console-status::before { width: 6px; height: 6px; box-shadow: none; }
 .console-panel .console-output { border-color: var(--border-subtle); background: var(--log-bg); box-shadow: none; font: 11px/1.5 var(--font-mono); }
 .toast.glass-surface { border-color: var(--border-subtle); background: var(--panel); color: var(--text); box-shadow: 0 10px 28px rgba(0, 0, 0, .16); }
+
+.settings-note { margin: -10px 0 10px; color: var(--text-subtle); font-size: 11px; line-height: 1.5; }
+.preflight { margin-top: 18px; padding: 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--surface); }
+.preflight h3 { margin: 0 0 8px; font-size: 12px; }
+.check-list { display: grid; gap: 0; max-height: 270px; overflow: auto; font-size: 11px; }
+.check-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--border-subtle); }
+.check-row:last-child { border-bottom: 0; }
+.check-row strong { min-width: 115px; color: var(--text); font-weight: 620; }
+.check-row span { min-width: 0; overflow-wrap: anywhere; color: var(--muted); text-align: right; font-family: var(--font-mono); }
+.check-row[data-level="warning"] span { color: var(--warning); }
+.check-row[data-level="error"] span { color: var(--danger); }
+.check-row[data-level="ok"] span { color: var(--success); }
+.model-compatibility { display: block; margin-top: 8px; color: var(--text-subtle); font-size: 10px; line-height: 1.35; }
+.health-dialog { max-height: calc(100dvh - 40px); }
 
 /* Keep the brand introduction, without an ambient halo. */
 .splash-glow { display: none; }

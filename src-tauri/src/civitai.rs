@@ -38,6 +38,8 @@ pub(crate) struct ModelFile {
     name: String,
     download_url: String,
     size_kb: f64,
+    #[serde(default)]
+    base_model: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -104,6 +106,7 @@ pub(crate) async fn get_starter_model(app: AppHandle, key: String) -> Result<Sta
         .find(|url| allowed_url(url).is_ok()).map(str::to_owned));
     Ok(StarterModel { preview_url, file: ModelFile {
         name, download_url, size_kb: selected.get("sizeKB").and_then(Value::as_f64).unwrap_or(0.0),
+        base_model: version.get("baseModel").and_then(Value::as_str).map(str::to_owned),
     } })
 }
 
@@ -158,6 +161,7 @@ pub(crate) async fn search_models(app: AppHandle, query: String) -> Result<Vec<M
                             files.push(ModelFile {
                                 name, download_url: download_url.to_owned(),
                                 size_kb: item.get("sizeKB").and_then(Value::as_f64).unwrap_or(0.0),
+                                base_model: version.get("baseModel").and_then(Value::as_str).map(str::to_owned),
                             });
                         }
                     }
@@ -196,7 +200,7 @@ fn safe_name(value: &str) -> String {
 }
 
 pub(crate) fn models_directory(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(crate::package_dir(app)?.join("models").join("Stable-diffusion"))
+    Ok(crate::models_library_dir(app)?.join("Stable-diffusion"))
 }
 
 fn paths(app: &AppHandle, file_name: &str) -> Result<(PathBuf, PathBuf, PathBuf), String> {
@@ -284,7 +288,8 @@ fn download(app: &AppHandle, control: &DownloadControl, file: ModelFile, model_t
         progress(app, task_id, &file.name, copied, copied, Some((copied - previous) as f64 / started.elapsed().as_secs_f64().max(0.1)));
         Ok(())
     })();
-    if result.is_err() && !control.paused.load(Ordering::SeqCst) {
+    // Preserve partial bytes after network errors so Retry can resume with Range.
+    if result.is_err() && control.cancelled.load(Ordering::SeqCst) {
         let _ = fs::remove_file(&temp);
         let _ = fs::remove_file(&meta);
     }
