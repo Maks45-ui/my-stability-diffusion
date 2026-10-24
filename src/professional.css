@@ -273,3 +273,22 @@ button:active:not(:disabled) { transform: translateY(1px) !important; }
 @media (prefers-reduced-motion: reduce) {
   .gallery-selection { transition: none; }
 }
+/* Gallery search, favorites and generation details. */
+.gallery-search { min-width: 170px; width: clamp(170px, 18vw, 240px); height: 34px; padding: 0 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface); color: var(--text); font-size: 12px; }
+.gallery-search:focus { outline: 1px solid var(--accent); }
+.gallery-favorites-toggle.active { border-color: var(--accent); color: var(--accent); }
+.gallery-favorite { position: absolute; top: 10px; left: 10px; z-index: 2; display: grid; place-items: center; width: 23px; height: 23px; border-radius: 50%; background: var(--panel); color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,0,.25); font-size: 14px; }
+.gallery-favorite[hidden], .image-info[hidden] { display: none !important; }
+.image-modal { width: min(1160px, calc(100% - 40px)); }
+.image-preview-layout { display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 14px; align-items: start; }
+.image-preview-layout > img { max-height: calc(100vh - 86px); }
+.image-info { max-height: calc(100vh - 86px); overflow: auto; padding: 15px; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--surface); color: var(--text); }
+.image-info h3 { margin: 0 30px 7px 0; font-size: 13px; }
+.image-info p { margin: 0 0 12px; color: var(--muted); font-size: 11px; }
+.image-info dl { margin: 0; }
+.image-info dt { margin: 11px 0 3px; color: var(--text-subtle); font: 10px var(--font-mono); text-transform: uppercase; }
+.image-info dd { margin: 0; color: var(--text); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.image-info details { margin-top: 15px; border-top: 1px solid var(--border-subtle); padding-top: 10px; }
+.image-info summary { cursor: pointer; color: var(--accent); font-size: 11px; }
+.image-info pre { overflow: auto; max-height: 220px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font: 10px var(--font-mono); }
+@media (max-width: 900px) { .image-preview-layout { grid-template-columns: 1fr; } .image-info { max-height: 230px; } }.image-preview-layout:has(.image-info[hidden]) { grid-template-columns: minmax(0, 1fr); }

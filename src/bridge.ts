@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AppState, CheckReport, DownloadedFile, FlowAPI, FlowUpdate, GalleryImage, ModelFile, ModelSummary, PackageInfo, Page, StarterModel, TaskEvent, WebUISettings, WebUIStatus } from "./types";
+import type { AppState, CheckReport, DownloadedFile, FlowAPI, FlowUpdate, GalleryImage, GalleryImageDetails, ModelFile, ModelSummary, PackageInfo, Page, StarterModel, TaskEvent, WebUISettings, WebUIStatus } from "./types";
 
 // The UI only knows this typed contract. System access stays in Rust.
 export const flowApi: FlowAPI = {
@@ -21,6 +21,7 @@ export const flowApi: FlowAPI = {
   checkXformers: () => invoke<string>("check_xformers"),
   installXformers: () => invoke<void>("install_xformers"),
   listGalleryImages: () => invoke<GalleryImage[]>("list_gallery_images"),
+  getGalleryImageDetails: (path: string) => invoke<GalleryImageDetails>("get_gallery_image_details", { path }),
   copyGalleryImage: (path: string) => invoke<void>("copy_gallery_image", { path }),
   deleteGalleryImages: (paths: string[]) => invoke<number>("delete_gallery_images", { paths }),
   searchModels: (query: string) => invoke<ModelSummary[]>("search_models", { query }),

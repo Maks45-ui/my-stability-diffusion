@@ -36,6 +36,9 @@ const consoleRestart = element<HTMLButtonElement>("restart-terminal-webui");
 const consoleStatus = element<HTMLElement>("console-status");
 const packageList = element<HTMLElement>("package-list");
 const galleryGrid = element<HTMLElement>("gallery-grid");
+const gallerySearch = element<HTMLInputElement>("gallery-search");
+const galleryFavoritesToggle = element<HTMLButtonElement>("gallery-favorites-toggle");
+const galleryImageInfo = element<HTMLElement>("gallery-image-info");
 const galleryEmpty = element<HTMLElement>("gallery-empty");
 const galleryStatus = element<HTMLElement>("gallery-status");
 const galleryCount = element<HTMLElement>("gallery-count");
@@ -66,7 +69,16 @@ new ThemeController(
 let hasLoadedCatalog = false;
 let searchSequence = 0;
 let gallerySequence = 0;
-let galleryImageCount = 0;
+
+let galleryItems: GalleryImage[] = [];
+let showOnlyFavorites = false;
+function loadGalleryFavorites(): Set<string> {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem("flow.gallery.favorites") ?? "[]");
+    return new Set(Array.isArray(stored) ? stored.filter((value): value is string => typeof value === "string") : []);
+  } catch { return new Set<string>(); }
+}
+const galleryFavorites = loadGalleryFavorites();
 let gallerySelectMode = false;
 const selectedGalleryPaths = new Set<string>();
 let contextGalleryImage: GalleryImage | null = null;
@@ -587,6 +599,7 @@ async function showImage(url: string): Promise<void> {
   previewGalleryImage = null;
   hideGalleryContextMenu();
   image.removeAttribute("src");
+  galleryImageInfo.hidden = true;
   imageDialog.showModal();
   try { image.src = await window.flow.getPreview(url); }
   catch (error) { imageDialog.close(); notify(message(error)); }
@@ -609,10 +622,59 @@ function showGalleryContextMenu(item: GalleryImage, x: number, y: number): void 
   galleryContextMenu.style.left = Math.max(8, relativeX) + "px";
   galleryContextMenu.style.top = Math.max(8, relativeY) + "px";
   galleryContextMenu.hidden = false;
+  element<HTMLButtonElement>("favorite-gallery-image").textContent =
+    galleryFavorites.has(item.path) ? "★ Убрать из избранного" : "☆ В избранное";
   const width = bounds?.width ?? window.innerWidth;
   const height = bounds?.height ?? window.innerHeight;
   galleryContextMenu.style.left = Math.max(8, Math.min(relativeX, width - galleryContextMenu.offsetWidth - 8)) + "px";
   galleryContextMenu.style.top = Math.max(8, Math.min(relativeY, height - galleryContextMenu.offsetHeight - 8)) + "px";
+}
+
+function renderGalleryFiltered(): void {
+  const query = gallerySearch.value.trim().toLocaleLowerCase("ru-RU");
+  const images = galleryItems.filter((item) =>
+    (!showOnlyFavorites || galleryFavorites.has(item.path))
+    && (!query || item.fileName.toLocaleLowerCase("ru-RU").includes(query)));
+  const fragment = document.createDocumentFragment();
+  for (const image of images) fragment.append(renderGalleryImage(image));
+  galleryGrid.replaceChildren(fragment);
+  galleryCount.textContent = galleryItems.length + " изображений";
+  galleryEmpty.hidden = galleryItems.length > 0;
+  galleryStatus.hidden = images.length > 0 || galleryItems.length === 0;
+  if (galleryItems.length > 0 && images.length === 0) galleryStatus.textContent = "По выбранным фильтрам изображений нет.";
+  gallerySelect.disabled = images.length === 0;
+  updateGallerySelection();
+}
+
+function toggleGalleryFavorite(item: GalleryImage): void {
+  if (galleryFavorites.has(item.path)) galleryFavorites.delete(item.path);
+  else galleryFavorites.add(item.path);
+  try { localStorage.setItem("flow.gallery.favorites", JSON.stringify([...galleryFavorites])); }
+  catch { notify("Не удалось сохранить избранное."); }
+  renderGalleryFiltered();
+}
+
+function showGalleryDetails(item: GalleryImage): void {
+  galleryImageInfo.hidden = false;
+  element<HTMLElement>("gallery-info-status").textContent = "Загрузка параметров…";
+  for (const id of ["prompt", "negative", "model", "seed", "steps", "sampler", "raw"]) {
+    element<HTMLElement>("gallery-info-" + id).textContent = "—";
+  }
+  void window.flow.getGalleryImageDetails(item.path).then((details) => {
+    if (!imageDialog.open || previewGalleryImage?.path !== item.path) return;
+    element<HTMLElement>("gallery-info-status").textContent =
+      details.parameters ? "Параметры из PNG" : "В файле нет параметров генерации PNG.";
+    element<HTMLElement>("gallery-info-prompt").textContent = details.prompt ?? "—";
+    element<HTMLElement>("gallery-info-negative").textContent = details.negativePrompt ?? "—";
+    element<HTMLElement>("gallery-info-model").textContent = details.model ?? "—";
+    element<HTMLElement>("gallery-info-seed").textContent = details.seed ?? "—";
+    element<HTMLElement>("gallery-info-steps").textContent = details.steps ?? "—";
+    element<HTMLElement>("gallery-info-sampler").textContent = details.sampler ?? "—";
+    element<HTMLElement>("gallery-info-raw").textContent = details.parameters ?? "—";
+  }).catch((error: unknown) => {
+    if (imageDialog.open && previewGalleryImage?.path === item.path)
+      element<HTMLElement>("gallery-info-status").textContent = "Ошибка чтения параметров: " + message(error);
+  });
 }
 
 function updateGallerySelection(): void {
@@ -654,6 +716,7 @@ function showGalleryImage(item: GalleryImage): void {
   };
   imageDialog.showModal();
   image.src = convertFileSrc(item.path);
+  showGalleryDetails(item);
 }
 
 function renderGalleryImage(item: GalleryImage): HTMLElement {
@@ -676,7 +739,10 @@ function renderGalleryImage(item: GalleryImage): HTMLElement {
   );
   const selection = make("span", "gallery-selection", "✓");
   selection.setAttribute("aria-hidden", "true");
-  button.append(image, caption, selection);
+  const favorite = make("span", "gallery-favorite", "★");
+  favorite.setAttribute("aria-hidden", "true");
+  favorite.hidden = !galleryFavorites.has(item.path);
+  button.append(image, caption, selection, favorite);
   button.addEventListener("click", () => {
     if (!gallerySelectMode) {
       showGalleryImage(item);
@@ -707,20 +773,17 @@ async function refreshGallery(): Promise<void> {
   try {
     const images = await window.flow.listGalleryImages();
     if (sequence !== gallerySequence) return;
-    galleryImageCount = images.length;
-    galleryCount.textContent = images.length + " изображений";
-    galleryStatus.hidden = true;
-    galleryEmpty.hidden = images.length > 0;
-    const fragment = document.createDocumentFragment();
-    for (const image of images) fragment.append(renderGalleryImage(image));
-    galleryGrid.append(fragment);
+
+    galleryItems = images;
+    renderGalleryFiltered();
   } catch (error) {
     if (sequence !== gallerySequence) return;
-    galleryImageCount = 0;
+
+    galleryItems = [];
     galleryStatus.textContent = "Не удалось загрузить галерею: " + message(error);
   } finally {
     if (sequence === gallerySequence) {
-      gallerySelect.disabled = galleryImageCount === 0;
+      gallerySelect.disabled = galleryGrid.childElementCount === 0;
       galleryRefresh.disabled = false;
     }
   }
@@ -761,6 +824,12 @@ function renderModel(model: ModelSummary): HTMLElement {
     }
     const button = make("button", "download-button", "Скачать ↓");
     button.type = "button";
+    const supportedFolder = /^(checkpoint)$/i.test(model.type) ? "Stable-diffusion"
+      : /^(lora|locon|lycoris|dora)$/i.test(model.type) ? "Lora"
+      : /^vae$/i.test(model.type) ? "VAE" : null;
+    button.disabled = supportedFolder === null;
+    if (!supportedFolder) button.title = "Автоматическая установка этого типа модели пока не поддерживается.";
+    else button.title = "Папка назначения: models/" + supportedFolder;
     button.addEventListener("click", () => {
       const file = model.files[Number(select.value)];
       if (!file) return;
@@ -769,9 +838,12 @@ function renderModel(model: ModelSummary): HTMLElement {
     const compatibility = make("small", "model-compatibility");
     const describe = (): void => {
       const base = model.files[Number(select.value)]?.baseModel ?? "";
-      compatibility.textContent = base.toLowerCase().includes("sdxl") || base.toLowerCase().includes("illustrious")
-        ? `${base}: Forge Neo рекомендуется для видеокарт с малой VRAM.`
-        : base ? `${base}: проверьте поддержку архитектуры выбранным WebUI.` : "Архитектура файла не указана в Civitai.";
+      compatibility.textContent = supportedFolder === null
+        ? "Этот тип пока нельзя установить автоматически."
+        : (base.toLowerCase().includes("sdxl") || base.toLowerCase().includes("illustrious")
+          ? `${base}: Forge Neo рекомендуется для видеокарт с малой VRAM.`
+          : base ? `${base}: проверьте поддержку архитектуры выбранным WebUI.` : "Архитектура файла не указана в Civitai.")
+          + " · Папка: models/" + supportedFolder;
     };
     select.addEventListener("change", describe);
     describe();
@@ -1048,6 +1120,19 @@ consoleCancel.addEventListener("click", async () => {
 });
 element<HTMLButtonElement>("close-image").addEventListener("click", () => imageDialog.close());
 galleryRefresh.addEventListener("click", () => void refreshGallery());
+gallerySearch.addEventListener("input", () => { setGallerySelectMode(false); renderGalleryFiltered(); });
+galleryFavoritesToggle.addEventListener("click", () => {
+  showOnlyFavorites = !showOnlyFavorites;
+  galleryFavoritesToggle.setAttribute("aria-pressed", String(showOnlyFavorites));
+  galleryFavoritesToggle.classList.toggle("active", showOnlyFavorites);
+  setGallerySelectMode(false);
+  renderGalleryFiltered();
+});
+element<HTMLButtonElement>("favorite-gallery-image").addEventListener("click", () => {
+  const item = contextGalleryImage;
+  hideGalleryContextMenu();
+  if (item) toggleGalleryFavorite(item);
+});
 gallerySelect.addEventListener("click", () => setGallerySelectMode(!gallerySelectMode));
 galleryDelete.addEventListener("click", () => {
   if (selectedGalleryPaths.size === 0) return;

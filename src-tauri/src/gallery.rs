@@ -98,6 +98,82 @@ fn checked_image(path: &str, roots: &[PathBuf]) -> Result<PathBuf, String> {
     Ok(canonical)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GalleryImageDetails {
+    prompt: Option<String>,
+    negative_prompt: Option<String>,
+    seed: Option<String>,
+    steps: Option<String>,
+    sampler: Option<String>,
+    model: Option<String>,
+    parameters: Option<String>,
+}
+
+fn parse_parameters(raw: Option<String>) -> GalleryImageDetails {
+    let mut details = GalleryImageDetails {
+        prompt: None, negative_prompt: None, seed: None, steps: None,
+        sampler: None, model: None, parameters: raw.clone(),
+    };
+    let Some(text) = raw else { return details; };
+    let settings_start = text.rfind("\nSteps: ").map(|index| index + 1)
+        .or_else(|| text.starts_with("Steps: ").then_some(0));
+    let (body, settings) = if let Some(index) = settings_start {
+        (&text[..index], &text[index..])
+    } else { (text.as_str(), "") };
+    let (prompt, negative) = if let Some(index) = body.find("Negative prompt: ") {
+        (&body[..index], Some(body[index + "Negative prompt: ".len()..].trim()))
+    } else { (body, None) };
+    let prompt = prompt.trim();
+    if !prompt.is_empty() { details.prompt = Some(prompt.to_owned()); }
+    details.negative_prompt = negative.filter(|value| !value.is_empty()).map(str::to_owned);
+    for part in settings.split(", ") {
+        if let Some((key, value)) = part.split_once(": ") {
+            let value = value.trim().to_owned();
+            match key {
+                "Seed" => details.seed = Some(value),
+                "Steps" => details.steps = Some(value),
+                "Sampler" => details.sampler = Some(value),
+                "Model" => details.model = Some(value),
+                _ => {}
+            }
+        }
+    }
+    details
+}
+
+fn png_parameters(file: &Path) -> Result<Option<String>, String> {
+    if !file.extension().and_then(|value| value.to_str()).is_some_and(|value| value.eq_ignore_ascii_case("png")) {
+        return Ok(None);
+    }
+    let input = fs::File::open(file).map_err(|error| error.to_string())?;
+    let decoder = png::Decoder::new(std::io::BufReader::new(input));
+    let reader = decoder.read_info().map_err(|error| format!("Не удалось прочитать PNG: {error}"))?;
+    let info = reader.info();
+    for chunk in &info.uncompressed_latin1_text {
+        if chunk.keyword == "parameters" { return Ok(Some(chunk.text.clone())); }
+    }
+    for chunk in &info.compressed_latin1_text {
+        if chunk.keyword == "parameters" {
+            return chunk.get_text().map(Some).map_err(|error| error.to_string());
+        }
+    }
+    for chunk in &info.utf8_text {
+        if chunk.keyword == "parameters" {
+            return chunk.get_text().map(Some).map_err(|error| error.to_string());
+        }
+    }
+    Ok(None)
+}
+
+#[tauri::command]
+pub(crate) async fn get_gallery_image_details(app: AppHandle, path: String) -> Result<GalleryImageDetails, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let file = checked_image(&path, &gallery_roots(&app)?)?;
+        png_parameters(&file).map(parse_parameters)
+    }).await.map_err(|error| error.to_string())?
+}
+
 #[cfg(windows)]
 fn preserve_original_png_in_clipboard(file: &Path) -> Result<(), String> {
     use windows_sys::Win32::Foundation::GlobalFree;
@@ -189,8 +265,18 @@ pub(crate) async fn delete_gallery_images(app: AppHandle, paths: Vec<String>) ->
 
 #[cfg(test)]
 mod tests {
-    use super::checked_image;
+    use super::{checked_image, parse_parameters};
     use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+
+    #[test]
+    fn parses_a1111_generation_metadata() {
+        let details = parse_parameters(Some("a portrait\nNegative prompt: blurry\nSteps: 28, Sampler: Euler a, Seed: 42, Model: test".to_owned()));
+        assert_eq!(details.prompt.as_deref(), Some("a portrait"));
+        assert_eq!(details.negative_prompt.as_deref(), Some("blurry"));
+        assert_eq!(details.steps.as_deref(), Some("28"));
+        assert_eq!(details.seed.as_deref(), Some("42"));
+        assert_eq!(details.model.as_deref(), Some("test"));
+    }
 
     #[test]
     fn deletion_scope_accepts_only_images_inside_output_root() {

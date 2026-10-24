@@ -1,6 +1,6 @@
 import type { DownloadedFile, FlowAPI, ModelFile, TaskEvent } from "./types";
 
-type DownloadStatus = "queued" | "downloading" | "pausing" | "paused" | "cancelling" | "completed" | "error";
+type DownloadStatus = "queued" | "downloading" | "verifying" | "pausing" | "paused" | "cancelling" | "completed" | "error";
 
 interface DownloadItem {
   id: string;
@@ -19,6 +19,7 @@ interface DownloadItem {
 const STATUS_TEXT: Record<DownloadStatus, string> = {
   queued: "В очереди",
   downloading: "Скачивается",
+  verifying: "Проверка SHA256",
   pausing: "Приостанавливается",
   paused: "Пауза",
   cancelling: "Отменяется",
@@ -78,7 +79,7 @@ export class DownloadManager {
   }
 
   enqueue(file: ModelFile, modelType: string, modelName: string): string | null {
-    const duplicate = [...this.items.values()].some((item) => item.file.name === file.name);
+    const duplicate = [...this.items.values()].some((item) => item.file.name === file.name && item.modelType === modelType);
     if (duplicate) { this.notify("Этот файл уже находится в списке загрузок."); return null; }
     const item: DownloadItem = {
       id: crypto.randomUUID(), modelName, modelType, file, status: "queued",
@@ -99,7 +100,10 @@ export class DownloadManager {
     if (event.bytesPerSecond !== undefined) item.bytesPerSecond = event.bytesPerSecond;
     if (event.percent !== undefined) item.percent = event.percent;
 
-    if (event.phase === "done") {
+    if (event.phase === "verifying") {
+      item.status = "verifying";
+      item.bytesPerSecond = 0;
+    } else if (event.phase === "done") {
       item.status = "completed";
       item.percent = 100;
       item.error = null;
@@ -124,12 +128,12 @@ export class DownloadManager {
   }
 
   private addCompleted(file: DownloadedFile): void {
-    const duplicate = [...this.items.values()].some((item) => item.file.name === file.name);
+    const duplicate = [...this.items.values()].some((item) => item.file.name === file.name && item.modelType === file.modelType);
     if (duplicate) return;
     const paused = file.status === "paused";
     this.add({
       id: crypto.randomUUID(), modelName: file.name, modelType: file.modelType,
-      file: { name: file.name, downloadUrl: file.downloadUrl ?? "", sizeKb: file.sizeBytes / 1024 },
+      file: { name: file.name, downloadUrl: file.downloadUrl ?? "", sizeKb: file.sizeBytes / 1024, sha256: file.sha256 },
       status: paused ? "paused" : "completed",
       percent: paused ? (file.sizeBytes > 0 ? Math.min(100, Math.floor(file.downloadedBytes / file.sizeBytes * 100)) : null) : 100,
       bytesDownloaded: file.downloadedBytes,
@@ -161,7 +165,7 @@ export class DownloadManager {
   }
 
   private updateCount(): void {
-    const active = [...this.items.values()].filter((item) => ["queued", "downloading", "pausing", "cancelling"].includes(item.status)).length;
+    const active = [...this.items.values()].filter((item) => ["queued", "downloading", "verifying", "pausing", "cancelling"].includes(item.status)).length;
     this.counter.textContent = active > 0 ? `${active} в работе · ${this.items.size} всего` : `${this.items.size} файлов`;
   }
 

@@ -511,6 +511,7 @@ pub fn run() {
             get_webui_settings,
             save_webui_settings,
             gallery::list_gallery_images,
+            gallery::get_gallery_image_details,
             gallery::copy_gallery_image,
             gallery::delete_gallery_images,
             set_page,

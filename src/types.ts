@@ -1,5 +1,5 @@
 export type Page = "home" | "gallery" | "models" | "settings";
-export type TaskPhase = "idle" | "checking" | "cloning" | "venv" | "dependencies" | "starting" | "stabilizing" | "ready" | "running" | "stopping" | "log" | "model_error" | "paused" | "done" | "error" | "cancelled";
+export type TaskPhase = "idle" | "checking" | "cloning" | "venv" | "dependencies" | "verifying" | "starting" | "stabilizing" | "ready" | "running" | "stopping" | "log" | "model_error" | "paused" | "done" | "error" | "cancelled";
 
 export interface PackageInfo {
   id: "automatic1111" | "forge-neo";
@@ -58,11 +58,22 @@ export interface GalleryImage {
   modifiedAt: number;
 }
 
+export interface GalleryImageDetails {
+  prompt: string | null;
+  negativePrompt: string | null;
+  seed: string | null;
+  steps: string | null;
+  sampler: string | null;
+  model: string | null;
+  parameters: string | null;
+}
+
 export interface ModelFile {
   name: string;
   downloadUrl: string;
   sizeKb: number;
   baseModel?: string | null;
+  sha256?: string | null;
 }
 
 export interface StarterModel {
@@ -77,6 +88,7 @@ export interface DownloadedFile {
   downloadedBytes: number;
   status: "completed" | "paused";
   downloadUrl: string | null;
+  sha256: string | null;
 }
 
 export interface ModelSummary {
@@ -132,6 +144,7 @@ export interface FlowAPI {
   checkXformers(): Promise<string>;
   installXformers(): Promise<void>;
   listGalleryImages(): Promise<GalleryImage[]>;
+  getGalleryImageDetails(path: string): Promise<GalleryImageDetails>;
   copyGalleryImage(path: string): Promise<void>;
   deleteGalleryImages(paths: string[]): Promise<number>;
   searchModels(query: string): Promise<ModelSummary[]>;
