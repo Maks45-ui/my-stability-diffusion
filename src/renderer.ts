@@ -360,7 +360,7 @@ async function openWebuiSettings(): Promise<void> {
   const memoryCard = document.querySelector<HTMLElement>(".webui-memory-card");
   if (memoryCard) {
     const forge = activePackageId === "forge-neo";
-    memoryCard.querySelectorAll<HTMLElement>(".webui-memory-presets, .webui-memory-toggle, .webui-xformers").forEach((item) => { item.hidden = forge; });
+    memoryCard.querySelectorAll<HTMLElement>(".webui-memory-presets, .webui-memory-toggle, .webui-xformers, .webui-memory-a1111").forEach((item) => { item.hidden = forge; });
     const advice = element<HTMLElement>("webui-memory-advice");
     advice.textContent = forge
       ? "Forge Neo управляет выгрузкой моделей самостоятельно. На 4 ГБ VRAM начинайте с 768 × 768 и увеличивайте размер постепенно."

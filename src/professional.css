@@ -1,3 +1,4 @@
+[hidden] { display: none !important; }
 /* Professional UI layer: compact hierarchy and restrained motion. */
 :root { --radius-control: 9px; --radius-card: 14px; --radius-panel: 18px; }
 html, body { font-family: var(--font-ui); font-size: 13px; letter-spacing: 0; }

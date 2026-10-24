@@ -43,7 +43,9 @@ fn checked_archive(url: &str, expected: &str, destination: &Path, control: &Inst
         .map_err(|error| format!("Не удалось скачать инструмент: {error}"))?;
     let parent = destination.parent().ok_or("Некорректная папка инструментов.")?;
     fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    let staging = parent.join(format!(".download-{}", std::process::id()));
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| error.to_string())?.as_nanos();
+    let staging = parent.join(format!(".download-{}-{stamp}", std::process::id()));
     if staging.exists() { return Err("Временная папка инструмента занята. Повторите установку позже.".to_owned()); }
     fs::create_dir(&staging).map_err(|error| error.to_string())?;
     let result = (|| {

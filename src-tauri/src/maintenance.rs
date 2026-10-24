@@ -203,6 +203,7 @@ fn safe_revision(revision: &str) -> bool {
 
 fn run_maintenance(app: &AppHandle, control: &installer::InstallControl, package_id: &str, action: &str) -> Result<(), String> {
     let (parent, directory) = managed_package(app, package_id)?;
+    crate::managed_tools::ensure_git(app, control, &parent)?;
     let expected = if package_id == "forge-neo" { "https://github.com/Haoming02/sd-webui-forge-classic" } else { "https://github.com/AUTOMATIC1111/stable-diffusion-webui" };
     let dir = directory.to_string_lossy().into_owned();
     let remote = git(app, &["-C".into(), dir.clone(), "remote".into(), "get-url".into(), "origin".into()])?;
