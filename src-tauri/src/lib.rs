@@ -4,6 +4,7 @@ mod gallery;
 mod installer;
 mod paths;
 mod maintenance;
+mod managed_tools;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -490,6 +491,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(Arc::new(installer::InstallControl::default()))
         .manage(installer::WebuiControl::default())
         .manage(Arc::new(civitai::DownloadControl::default()))

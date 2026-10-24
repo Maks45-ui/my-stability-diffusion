@@ -67,6 +67,9 @@ impl InstallControl {
     pub(crate) fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
     }
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
     pub(crate) fn try_start(&self) -> Result<(), String> {
         if self.running.swap(true, Ordering::SeqCst) { return Err("Установка или обслуживание уже выполняется.".to_owned()); }
         self.cancelled.store(false, Ordering::SeqCst);
@@ -160,8 +163,10 @@ fn emit_output(app: &AppHandle, output: &[u8]) {
 }
 
 pub(crate) fn command_output(app: &AppHandle, program: &str, args: &[String]) -> Result<String, String> {
-    let mut command = Command::new(program);
+    let executable = if program == "git" { crate::managed_tools::git_program(app) } else { PathBuf::from(program) };
+    let mut command = Command::new(executable);
     command.args(args).stdin(Stdio::null());
+    if let Ok(parent) = installation_dir(app) { crate::managed_tools::add_git_to_path(&mut command, &parent); }
     hide_console(&mut command);
     let output = command.output().map_err(|error| error.to_string())?;
     emit_output(app, &output.stdout);
@@ -198,32 +203,8 @@ fn python_310(app: &AppHandle) -> Result<(String, Vec<String>), String> {
 }
 
 fn uv_for_forge(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<PathBuf, String> {
-    let mut probe = Command::new("uv");
-    probe.arg("--version").stdin(Stdio::null());
-    hide_console(&mut probe);
-    if probe.output().is_ok_and(|output| output.status.success()) {
-        notify(app, "checking", "uv найден; он подготовит Python 3.13 для Forge Neo.");
-        return Ok(PathBuf::from("uv"));
-    }
-
-    // A small, separate bootstrap environment lets uv download Python 3.13
-    // without changing the user's system Python or Stability Matrix package.
-    let tools_dir = parent.join(".flow-tools");
-    let bootstrap = tools_dir.join("uv-bootstrap");
-    let uv = if cfg!(windows) { bootstrap.join("Scripts/uv.exe") } else { bootstrap.join("bin/uv") };
-    if uv.is_file() { return Ok(uv); }
-    notify(app, "checking", "uv не найден; устанавливаю его для подготовки Python 3.13…");
-    let (python, mut prefix) = python_310(app).map_err(|_| "Для автоматической установки Python 3.13 нужен uv или Python 3.10. Установите uv и повторите установку Forge Neo.".to_owned())?;
-    fs::create_dir_all(&tools_dir).map_err(|error| error.to_string())?;
-    prefix.extend(["-m".to_owned(), "venv".to_owned(), bootstrap.to_string_lossy().into_owned()]);
-    let bootstrap_python = python_in_venv(&bootstrap);
-    if !bootstrap_python.is_file() {
-        run_logged(app, control, &python, &prefix, &tools_dir, None)?;
-    }
-    run_logged_retry_locked(app, control, &bootstrap_python.to_string_lossy(),
-        &["-m".to_owned(), "pip".to_owned(), "install".to_owned(), "--upgrade".to_owned(), "uv".to_owned()], &tools_dir)?;
-    if !uv.is_file() { return Err("uv не появился после установки.".to_owned()); }
-    Ok(uv)
+    notify(app, "checking", "Проверка встроенного Python-менеджера uv…");
+    crate::managed_tools::ensure_uv(control, parent)
 }
 
 fn python_module_installed(python: &Path, module: &str) -> Result<bool, String> {
@@ -363,7 +344,9 @@ fn tail_webui_log(app: AppHandle, mut reader: fs::File, control: WebuiControl, s
 
 fn run_logged_kind(app: &AppHandle, control: &InstallControl, kind: &'static str, program: &str, args: &[String], cwd: &Path, locked_file: Option<Arc<AtomicBool>>, env: &[(&str, &Path)]) -> Result<(), String> {
     if control.cancelled.load(Ordering::SeqCst) { return Err("Установка отменена.".to_owned()); }
-    let mut command = Command::new(program);
+    let executable = if program == "git" { crate::managed_tools::git_program(app) } else { PathBuf::from(program) };
+    let mut command = Command::new(executable);
+    if let Ok(parent) = installation_dir(app) { crate::managed_tools::add_git_to_path(&mut command, &parent); }
     command.args(args).current_dir(cwd)
         .env("PYTHONUNBUFFERED", "1")
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -688,8 +671,8 @@ pub(crate) fn install(app: &AppHandle, control: &InstallControl, parent: &Path) 
 
 pub(crate) fn install_forge_neo(app: &AppHandle, control: &InstallControl, parent: &Path) -> Result<(), String> {
     notify(app, "checking", "Проверка Git для Forge Neo…");
-    command_output(app, "git", &["--version".to_owned()])
-        .map_err(|_| "Git не найден. Установите Git и перезапустите Flow.".to_owned())?;
+    let git = crate::managed_tools::ensure_git(app, control, parent)?;
+    notify(app, "checking", format!("Git готов: {}", git.display()));
     let directory = parent.join("sd-webui-forge-neo");
     notify(app, "cloning", format!("Forge Neo будет установлен отдельно: {}", directory.display()));
     if directory.exists() {
@@ -923,6 +906,7 @@ pub(crate) fn launch_web_ui(app: AppHandle, webui: State<'_, WebuiControl>, inst
     // webui-user.bat clears COMMANDLINE_ARGS and does not forward its own arguments.
     // Passing args directly to launch.py also avoids shell quoting and a visible CMD window.
     let mut command = Command::new(python);
+    if let Ok(parent) = installation_dir(&app) { crate::managed_tools::add_git_to_path(&mut command, &parent); }
     command.arg("-u").arg("launch.py").args(&arguments);
     if !forge { use_local_clip_sources(&mut command, &directory); }
     command.current_dir(&directory)

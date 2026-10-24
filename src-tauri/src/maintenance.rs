@@ -77,10 +77,12 @@ fn git(app: &AppHandle, args: &[String]) -> Result<String, String> {
     installer::command_output(app, "git", args)
 }
 
-fn environment_checks(parent: &Path, package_id: &str) -> Vec<CheckEntry> {
+fn environment_checks(app: &AppHandle, parent: &Path, package_id: &str) -> Vec<CheckEntry> {
     let mut checks = Vec::new();
-    match quiet_output("git", &["--version"], None) {
+    let git = installer::command_output(app, "git", &["--version".to_owned()]);
+    match git {
         Ok(version) => checks.push(entry("Git", version, "ok")),
+        Err(_) if package_id == "forge-neo" && cfg!(windows) => checks.push(entry("Git", "Flow скачает проверенную копию Git при установке", "info")),
         Err(_) => checks.push(entry("Git", "Не найден — установка невозможна", "error")),
     }
     if package_id == "automatic1111" {
@@ -91,11 +93,10 @@ fn environment_checks(parent: &Path, package_id: &str) -> Vec<CheckEntry> {
             _ => checks.push(entry("Python", "Требуется Python 3.10", "error")),
         }
     } else {
-        let uv = quiet_output("uv", &["--version"], None).is_ok();
-        let bootstrap = quiet_output("py", &["-3.10", "-c", "import sys; print(sys.version.split()[0])"], None)
-            .or_else(|_| quiet_output("python", &["-c", "import sys; print(sys.version.split()[0])"], None))
-            .is_ok_and(|version| version.starts_with("3.10."));
-        checks.push(entry("Python/uv", if uv { "uv подготовит Python 3.13" } else if bootstrap { "Python 3.10 установит uv и Python 3.13" } else { "Нужен uv или Python 3.10 для подготовки Python 3.13" }, if uv || bootstrap { "ok" } else { "error" }));
+        let uv = quiet_output("uv", &["--version"], None).is_ok()
+            || installer::venv_python(&parent.join("sd-webui-forge-neo")).is_file()
+            || installation_dir(app).ok().is_some_and(|root| root.join(".flow-tools/uv/uv.exe").is_file());
+        checks.push(entry("Python/uv", if uv { "Python-менеджер готов" } else { "Flow скачает uv и Python 3.13 при установке" }, "info"));
     }
     #[cfg(windows)] {
         if let Some((disk, ram, free_commit, limit)) = windows_resources(parent) {
@@ -123,7 +124,7 @@ pub(crate) async fn get_preflight(app: AppHandle, package_id: String) -> Result<
     if package_id != "automatic1111" && package_id != "forge-neo" { return Err("Неизвестный пакет.".to_owned()); }
     tauri::async_runtime::spawn_blocking(move || {
         let parent = installation_dir(&app)?;
-        let checks = environment_checks(&parent, &package_id);
+        let checks = environment_checks(&app, &parent, &package_id);
         let can_proceed = !checks.iter().any(|item| item.level == "error");
         Ok(CheckReport { title: "Проверка перед установкой".to_owned(), checks, can_proceed })
     }).await.map_err(|error| error.to_string())?
@@ -146,7 +147,7 @@ fn managed_package(app: &AppHandle, package_id: &str) -> Result<(PathBuf, PathBu
 pub(crate) async fn check_package(app: AppHandle, package_id: String) -> Result<CheckReport, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let (_, directory) = managed_package(&app, &package_id)?;
-        let mut checks = environment_checks(&directory, &package_id);
+        let mut checks = environment_checks(&app, &directory, &package_id);
         checks.push(entry("Файлы WebUI", if directory.join("launch.py").is_file() { "launch.py найден" } else { "launch.py отсутствует" }, if directory.join("launch.py").is_file() { "ok" } else { "error" }));
         if package_id == "forge-neo" {
             checks.push(entry("Forge", if directory.join("modules_forge").is_dir() { "Модули найдены" } else { "Модули отсутствуют" }, if directory.join("modules_forge").is_dir() { "ok" } else { "error" }));
@@ -167,7 +168,8 @@ pub(crate) async fn check_package(app: AppHandle, package_id: String) -> Result<
             }
         } else { checks.push(entry("Окружение", "Python venv отсутствует", "error")); }
         let git_dir = directory.to_string_lossy().into_owned();
-        let origin = quiet_output("git", &["-C", &git_dir, "remote", "get-url", "origin"], None).unwrap_or_default();
+        let git_exe = crate::managed_tools::git_program(&app);
+        let origin = quiet_output(&git_exe.to_string_lossy(), &["-C", &git_dir, "remote", "get-url", "origin"], None).unwrap_or_default();
         let expected = if package_id == "forge-neo" { "Haoming02/sd-webui-forge-classic" } else { "AUTOMATIC1111/stable-diffusion-webui" };
         checks.push(entry("Исходный репозиторий", if origin.is_empty() { "Не найден" } else { &origin }, if origin.contains(expected) { "ok" } else { "error" }));
         if let Ok(dir) = data_dir(&app) {

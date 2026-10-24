@@ -1,5 +1,7 @@
 import { flowApi } from "./bridge";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { DownloadManager } from "./download-manager";
 import { FirstRunController } from "./onboarding";
 import { ThemeController } from "./theme";
@@ -356,7 +358,24 @@ function addWebuiArgument(raw: string): boolean {
 
 async function openWebuiSettings(): Promise<void> {
   const memoryCard = document.querySelector<HTMLElement>(".webui-memory-card");
-  if (memoryCard) memoryCard.hidden = activePackageId === "forge-neo";
+  if (memoryCard) {
+    const forge = activePackageId === "forge-neo";
+    memoryCard.querySelectorAll<HTMLElement>(".webui-memory-presets, .webui-memory-toggle, .webui-xformers").forEach((item) => { item.hidden = forge; });
+    const advice = element<HTMLElement>("webui-memory-advice");
+    advice.textContent = forge
+      ? "Forge Neo управляет выгрузкой моделей самостоятельно. На 4 ГБ VRAM начинайте с 768 × 768 и увеличивайте размер постепенно."
+      : "Определяю доступную видеопамять…";
+    if (!forge) void window.flow.getPreflight("automatic1111").then((report) => {
+      if (!webuiSettingsDialog.open || activePackageId === "forge-neo") return;
+      const gpu = report.checks.find((check) => check.label === "Видеокарта");
+      const mib = gpu?.value.match(/(\d+) МиБ VRAM/);
+      const amount = mib ? Number(mib[1]) : null;
+      advice.textContent = amount === null ? "VRAM не определена. Выберите профиль вручную по характеристикам видеокарты."
+        : amount <= 5120 ? `Обнаружено ${(amount / 1024).toFixed(1)} ГБ VRAM. Рекомендуется «Профиль 4 ГБ» и перезапуск WebUI.`
+        : amount <= 8192 ? `Обнаружено ${(amount / 1024).toFixed(1)} ГБ VRAM. Для SDXL начните со сбалансированного профиля.`
+        : `Обнаружено ${(amount / 1024).toFixed(1)} ГБ VRAM. Дополнительные ограничения памяти обычно не нужны.`;
+    }).catch(() => { advice.textContent = "Не удалось определить VRAM. Профиль можно выбрать вручную."; });
+  }
   document.querySelectorAll<HTMLButtonElement>(".webui-quick-arg").forEach((button) => {
     button.hidden = activePackageId === "forge-neo" && button.dataset.argument !== "--xformers"
       && button.dataset.argument !== "--api" && button.dataset.argument !== "--listen";
@@ -1194,14 +1213,47 @@ element<HTMLButtonElement>("browse-install-dialog").addEventListener("click", ()
 element<HTMLButtonElement>("browse-models-library").addEventListener("click", () => void browseModelsLibrary());
 element<HTMLButtonElement>("close-health").addEventListener("click", () => element<HTMLDialogElement>("health-dialog").close());
 element<HTMLButtonElement>("health-close").addEventListener("click", () => element<HTMLDialogElement>("health-dialog").close());
+let pendingFlowUpdate: Update | null = null;
+const installFlowUpdateButton = element<HTMLButtonElement>("install-flow-update");
+const flowUpdateStatus = element<HTMLElement>("flow-update-status");
 element<HTMLButtonElement>("check-flow-update").addEventListener("click", async () => {
-  const status = element<HTMLElement>("flow-update-status");
-  status.textContent = "Проверяем выпуски…";
+  flowUpdateStatus.textContent = "Проверяю подписанные обновления…";
+  installFlowUpdateButton.hidden = true;
+  pendingFlowUpdate = null;
   try {
-    const update = await window.flow.checkFlowUpdate();
-    status.textContent = update.available ? `Доступна версия ${update.latestVersion} (установлена ${update.currentVersion}). Откройте «Выпуски» для установки.`
-      : update.latestVersion ? `Установлена актуальная версия ${update.currentVersion}.` : "Опубликованных выпусков пока нет.";
-  } catch (error) { status.textContent = `Не удалось проверить: ${message(error)}`; }
+    const update = await check();
+    pendingFlowUpdate = update;
+    if (update) {
+      flowUpdateStatus.textContent = `Доступна версия ${update.version}. Установка потребует перезапуска Flow.`;
+      installFlowUpdateButton.hidden = false;
+    } else flowUpdateStatus.textContent = "Установлена актуальная версия Flow.";
+  } catch (error) {
+    flowUpdateStatus.textContent = `Проверка недоступна: ${message(error)}`;
+  }
+});
+installFlowUpdateButton.addEventListener("click", async () => {
+  const update = pendingFlowUpdate;
+  if (!update) return;
+  if (installing || webuiRunning) {
+    flowUpdateStatus.textContent = "Перед обновлением завершите установку и остановите WebUI.";
+    return;
+  }
+  installFlowUpdateButton.disabled = true;
+  flowUpdateStatus.textContent = "Скачивание подписанного обновления…";
+  let received = 0;
+  let total = 0;
+  try {
+    await update.downloadAndInstall((event) => {
+      if (event.event === "Started") total = event.data.contentLength ?? 0;
+      if (event.event === "Progress") received += event.data.chunkLength;
+      if (event.event === "Finished") { flowUpdateStatus.textContent = "Обновление проверено и установлено. Перезапускаю Flow…"; return; }
+      if (total > 0) flowUpdateStatus.textContent = `Скачивание обновления: ${Math.min(100, Math.floor(received / total * 100))}%`;
+    });
+    await relaunch();
+  } catch (error) {
+    flowUpdateStatus.textContent = `Обновление не удалось: ${message(error)}`;
+    installFlowUpdateButton.disabled = false;
+  }
 });
 element<HTMLButtonElement>("open-flow-releases").addEventListener("click", () => void window.flow.openFlowReleases().catch((error: unknown) => notify(message(error))));
 element<HTMLButtonElement>("theme-toggle").addEventListener("click", () => {
