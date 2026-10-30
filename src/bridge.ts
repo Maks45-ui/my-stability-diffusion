@@ -24,7 +24,7 @@ export const flowApi: FlowAPI = {
   getGalleryImageDetails: (path: string) => invoke<GalleryImageDetails>("get_gallery_image_details", { path }),
   copyGalleryImage: (path: string) => invoke<void>("copy_gallery_image", { path }),
   deleteGalleryImages: (paths: string[]) => invoke<number>("delete_gallery_images", { paths }),
-  searchModels: (query: string) => invoke<ModelSummary[]>("search_models", { query }),
+  searchModels: (query: string, sort: "popular" | "newest" | "rated", modelType: string) => invoke<ModelSummary[]>("search_models", { query, sort, modelType }),
   getStarterModel: (key: string) => invoke<StarterModel>("get_starter_model", { key }),
   downloadModel: (file: ModelFile, type: string, taskId: string, resume: boolean) => invoke<void>("download_model", { file, modelType: type, taskId, resume }),
   pauseDownload: () => invoke<void>("pause_download"),
@@ -56,3 +56,4 @@ export const flowApi: FlowAPI = {
     return typeof selected === "string" ? selected : null;
   }
 };
+

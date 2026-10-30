@@ -78,11 +78,11 @@ let searchSequence = 0;
 let gallerySequence = 0;
 let homeRecentSequence = 0;
 let inspectorSequence = 0;
-let inspectorTimer: number | undefined;
 let inspectedGalleryImage: GalleryImage | null = null;
 
 let galleryItems: GalleryImage[] = [];
 let showOnlyFavorites = false;
+let galleryKind: GalleryImage["kind"] | "all" = "all";
 function loadGalleryFavorites(): Set<string> {
   try {
     const stored: unknown = JSON.parse(localStorage.getItem("flow.gallery.favorites") ?? "[]");
@@ -92,6 +92,7 @@ function loadGalleryFavorites(): Set<string> {
 const galleryFavorites = loadGalleryFavorites();
 let gallerySelectMode = false;
 const selectedGalleryPaths = new Set<string>();
+let pendingGalleryDeletePaths: string[] = [];
 let contextGalleryImage: GalleryImage | null = null;
 let previewGalleryImage: GalleryImage | null = null;
 let stateSequence = 0;
@@ -103,6 +104,7 @@ let stoppingWebui = false;
 let webuiControlBusy = false;
 let hasWebuiPackage = false;
 let webuiRunning = false;
+let webuiStartedAt: number | null = null;
 let installationDir = "";
 let preflightSequence = 0;
 let activePackageId: PackageInfo["id"] = "automatic1111";
@@ -418,6 +420,7 @@ async function openWebuiSettings(): Promise<void> {
 }
 
 function showPage(page: Page): void {
+  document.body.dataset.page = page;
   document.querySelectorAll<HTMLElement>(".page").forEach((section) => section.classList.toggle("active", section.id === `page-${page}`));
   document.querySelectorAll<HTMLButtonElement>(".nav-item").forEach((button) => {
     const active = button.dataset.page === page;
@@ -437,7 +440,9 @@ function showPage(page: Page): void {
 function renderPackages(state: AppState): void {
   packageList.replaceChildren();
   const count = state.packages.length;
-  activePackageId = state.packages.find((item) => item.active)?.id ?? "automatic1111";
+  const activePackage = state.packages.find((item) => item.active) ?? state.packages[0];
+  activePackageId = activePackage?.id ?? "automatic1111";
+  element<HTMLElement>("runtime-package").textContent = activePackage?.name ?? "Пакет не выбран";
   hasWebuiPackage = count > 0;
   webuiRunning = state.packages.some((item) => item.running);
   updateConsoleControls();
@@ -453,16 +458,25 @@ function renderPackages(state: AppState): void {
     packageList.append(empty);
     return;
   }
-  for (const item of state.packages) {
+  for (const item of [...state.packages].sort((left, right) => Number(right.active) - Number(left.active))) {
     const card = make("article", "package-card glass-surface");
     card.dataset.active = String(item.active);
-    const icon = make("div", "package-icon", item.id === "forge-neo" ? "F" : "A");
+    const icon = make("div", "package-icon");
+    icon.innerHTML = '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linejoin="round" aria-hidden="true"><path d="M32 5 55 18v28L32 59 9 46V18L32 5Z"/><path d="m9 18 23 14 23-14M32 32v27"/></svg>';
     const details = make("div", "package-details");
-    details.append(make("h3", "", item.name), make("p", "", `${item.version} · Stable Diffusion`), make("small", "", item.path));
+    const titleRow = make("div", "package-title-row");
+    titleRow.append(make("h3", "", item.name));
+    details.append(titleRow, make("p", "package-description", item.id === "forge-neo"
+      ? "Универсальный пакет для генерации изображений с поддержкой SDXL, Flux и расширений."
+      : "Пакет Stable Diffusion WebUI для генерации изображений и работы с моделями."));
+    const tags = make("div", "package-tags");
+    for (const tag of (item.id === "forge-neo" ? ["SDXL", "Flux", "Плагины", item.version] : ["WebUI", item.version])) tags.append(make("span", "", tag));
+    details.append(tags, make("small", "package-path", item.path));
     if (item.readyUrl) details.append(make("small", "package-url", item.readyUrl));
     const badge = make("span", "package-state", item.stopping ? "Останавливается" : item.readyUrl ? "Запущен" : item.running ? "Запускается" : item.stopped ? "Остановлен" : "Готов");
     badge.dataset.state = item.stopping ? "stopping" : item.readyUrl ? "running" : item.running ? "starting" : item.stopped ? "stopped" : "ready";
-    card.append(icon, details, badge);
+    titleRow.append(badge);
+    card.append(icon, details);
     const actions = make("div", "package-actions");
     const launch = make("button", "primary-button", "Запустить");
     launch.type = "button";
@@ -512,7 +526,11 @@ function renderPackages(state: AppState): void {
         await openWebuiSettings();
       } catch (error) { notify(message(error)); }
     });
-    actions.append(launch, open, stop, settings);
+    const more = make("details", "package-more");
+    const moreSummary = make("summary", "secondary-button", "•••");
+    moreSummary.setAttribute("aria-label", "Дополнительные действия с пакетом");
+    more.append(moreSummary, settings);
+    actions.append(launch, stop, open, more);
     const linkModels = make("button", "secondary-button", "Связать модели");
     linkModels.type = "button";
     linkModels.title = "Добавить существующие чекпоинты в общую библиотеку без копирования (только один диск NTFS)";
@@ -526,7 +544,7 @@ function renderPackages(state: AppState): void {
         await refreshState();
       } catch (error) { notify(message(error)); linkModels.disabled = false; }
     });
-    actions.append(linkModels);
+    more.append(linkModels);
     if (item.managed) {
       const check = make("button", "secondary-button", "Проверить");
       check.type = "button";
@@ -539,13 +557,13 @@ function renderPackages(state: AppState): void {
       update.type = "button";
       update.disabled = item.running || installing;
       update.addEventListener("click", () => void runPackageMaintenance(item, "update"));
-      actions.append(check, repair, update);
+      more.append(check, repair, update);
       if (item.hasRollback) {
         const rollback = make("button", "secondary-button", "Откатить");
         rollback.type = "button";
         rollback.disabled = item.running || installing;
         rollback.addEventListener("click", () => void runPackageMaintenance(item, "rollback"));
-        actions.append(rollback);
+        more.append(rollback);
       }
     }
     card.append(actions);
@@ -576,6 +594,7 @@ async function refreshWebUIStatus(): Promise<void> {
     webuiRunning = status.running;
     updateConsoleControls();
     const ready = status.running && status.port !== null && status.pingMs !== null;
+    if (!status.running) webuiStartedAt = null;
     const mode = ready ? "ready" : status.running ? "pending" : "offline";
     element<HTMLElement>("runtime-dot").dataset.state = mode;
     element<HTMLElement>("sidebar-status-dot").dataset.state = mode;
@@ -586,6 +605,12 @@ async function refreshWebUIStatus(): Promise<void> {
     element<HTMLElement>("runtime-ping").textContent = status.pingMs === null ? "—" : `${status.pingMs} ms`;
     const used = status.vramUsedGb;
     const total = status.vramTotalGb;
+    element<HTMLElement>("home-vram").textContent = used !== null && total !== null
+      ? `${used.toFixed(1)} / ${total.toFixed(1)} ГБ` : "— / — ГБ";
+    element<HTMLElement>("home-vram-fill").style.width = used !== null && total !== null && total > 0
+      ? `${Math.min(100, Math.round(used / total * 100))}%` : "0%";
+    element<HTMLElement>("home-port").textContent = status.port === null ? "—" : `:${status.port}`;
+    updateHomeUptime();
     element<HTMLElement>("runtime-vram").textContent = used !== null && total !== null
       ? `${used.toFixed(1)} / ${total.toFixed(1)} GB` : "— / — GB";
     const model = status.activeModel?.trim() || "—";
@@ -603,7 +628,17 @@ async function refreshWebUIStatus(): Promise<void> {
     element<HTMLElement>("runtime-ping").textContent = "—";
     element<HTMLElement>("runtime-vram").textContent = "— / — GB";
     element<HTMLElement>("runtime-model").textContent = "—";
+    element<HTMLElement>("home-vram").textContent = "— / — ГБ";
+    element<HTMLElement>("home-vram-fill").style.width = "0%";
+    element<HTMLElement>("home-port").textContent = "—";
   }
+}
+
+function updateHomeUptime(): void {
+  if (!webuiStartedAt) { element<HTMLElement>("home-uptime").textContent = "—"; return; }
+  const minutes = Math.max(0, Math.floor((Date.now() - webuiStartedAt) / 60_000));
+  element<HTMLElement>("home-uptime").textContent = minutes >= 60
+    ? `${Math.floor(minutes / 60)} ч ${minutes % 60} мин` : `${minutes} мин`;
 }
 
 const imageObserver = new IntersectionObserver((entries, observer) => {
@@ -661,11 +696,12 @@ function showGalleryContextMenu(item: GalleryImage, x: number, y: number): void 
 
 function renderHomeRecent(images: GalleryImage[]): void {
   homeRecentGrid.replaceChildren();
+  element<HTMLElement>("home-generated-count").textContent = String(images.length);
   if (images.length === 0) {
     homeRecentGrid.append(make("p", "home-placeholder", "Изображения появятся после генерации."));
     return;
   }
-  for (const item of images.slice(0, 4)) {
+  for (const item of images.slice(0, 6)) {
     const button = make("button", "home-recent-image");
     button.type = "button";
     button.title = item.fileName;
@@ -674,7 +710,12 @@ function renderHomeRecent(images: GalleryImage[]): void {
     image.alt = item.fileName;
     image.loading = "lazy";
     image.src = convertFileSrc(item.path);
-    button.append(image);
+    const caption = make("span", "home-recent-caption");
+    const dimensions = make("span", "", "—");
+    image.addEventListener("load", () => { dimensions.textContent = `${image.naturalWidth} × ${image.naturalHeight}`; });
+    const age = make("small", "", item.modifiedAt ? new Date(item.modifiedAt).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
+    caption.append(dimensions, age);
+    button.append(image, caption);
     button.addEventListener("click", () => showGalleryImage(item));
     homeRecentGrid.append(button);
   }
@@ -693,14 +734,16 @@ async function refreshHomeRecent(): Promise<void> {
 function updateInspectorFavorite(): void {
   const button = element<HTMLButtonElement>("inspector-favorite");
   button.textContent = inspectedGalleryImage && galleryFavorites.has(inspectedGalleryImage.path)
-    ? "★ В избранном" : "☆ В избранное";
+    ? "★" : "☆";
+  button.setAttribute("aria-label", inspectedGalleryImage && galleryFavorites.has(inspectedGalleryImage.path)
+    ? "Убрать из избранного" : "В избранное");
 }
 
 function inspectGalleryImage(item: GalleryImage | null): void {
   const sequence = ++inspectorSequence;
   inspectedGalleryImage = item;
   const hasImage = item !== null;
-  for (const id of ["inspector-open", "inspector-copy", "inspector-favorite"]) {
+  for (const id of ["inspector-open", "inspector-copy", "inspector-favorite", "inspector-delete"]) {
     element<HTMLButtonElement>(id).disabled = !hasImage;
   }
   updateInspectorFavorite();
@@ -708,9 +751,14 @@ function inspectGalleryImage(item: GalleryImage | null): void {
   inspectorImage.hidden = !hasImage;
   element<HTMLElement>("inspector-name").textContent = item?.fileName ?? "—";
   element<HTMLElement>("inspector-status").textContent = hasImage ? "Читаем параметры изображения…" : "Параметры PNG появятся здесь.";
-  for (const id of ["model", "size", "seed", "steps", "sampler", "prompt"]) {
+  for (const id of ["model", "size", "seed", "steps", "sampler", "prompt", "negative"]) {
     element<HTMLElement>("inspector-" + id).textContent = "—";
   }
+  element<HTMLElement>("inspector-file-name").textContent = item?.fileName ?? "—";
+  element<HTMLElement>("inspector-file-kind").textContent = item?.kind ?? "—";
+  element<HTMLElement>("inspector-file-date").textContent = item?.modifiedAt ? new Date(item.modifiedAt).toLocaleString("ru-RU") : "—";
+  element<HTMLElement>("inspector-file-path").textContent = item?.path ?? "—";
+  galleryGrid.querySelectorAll<HTMLElement>(".gallery-card").forEach((card) => card.classList.toggle("inspected", item !== null && card.dataset.path === item.path));
   if (!item) { inspectorImage.removeAttribute("src"); return; }
   inspectorImage.onload = () => {
     if (sequence === inspectorSequence) element<HTMLElement>("inspector-size").textContent = `${inspectorImage.naturalWidth} × ${inspectorImage.naturalHeight}`;
@@ -727,6 +775,7 @@ function inspectGalleryImage(item: GalleryImage | null): void {
     element<HTMLElement>("inspector-steps").textContent = details.steps ?? "—";
     element<HTMLElement>("inspector-sampler").textContent = details.sampler ?? "—";
     element<HTMLElement>("inspector-prompt").textContent = details.prompt ?? "—";
+    element<HTMLElement>("inspector-negative").textContent = details.negativePrompt ?? "—";
   }).catch((error: unknown) => {
     if (sequence === inspectorSequence) element<HTMLElement>("inspector-status").textContent = "Параметры недоступны: " + message(error);
   });
@@ -736,11 +785,13 @@ function renderGalleryFiltered(): void {
   const query = gallerySearch.value.trim().toLocaleLowerCase("ru-RU");
   const images = galleryItems.filter((item) =>
     (!showOnlyFavorites || galleryFavorites.has(item.path))
+    && (galleryKind === "all" || item.kind === galleryKind)
     && (!query || item.fileName.toLocaleLowerCase("ru-RU").includes(query)));
   const fragment = document.createDocumentFragment();
   for (const image of images) fragment.append(renderGalleryImage(image));
   galleryGrid.replaceChildren(fragment);
   if (!images.some((item) => item.path === inspectedGalleryImage?.path)) inspectGalleryImage(images[0] ?? null);
+  else galleryGrid.querySelector<HTMLElement>(`.gallery-card[data-path="${CSS.escape(inspectedGalleryImage?.path ?? "")}"]`)?.classList.add("inspected");
   galleryCount.textContent = galleryItems.length + " изображений";
   galleryEmpty.hidden = galleryItems.length > 0;
   galleryStatus.hidden = images.length > 0 || galleryItems.length === 0;
@@ -850,7 +901,7 @@ function renderGalleryImage(item: GalleryImage): HTMLElement {
   button.append(image, caption, selection, favorite);
   button.addEventListener("click", () => {
     if (!gallerySelectMode) {
-      showGalleryImage(item);
+      inspectGalleryImage(item);
       return;
     }
     if (selectedGalleryPaths.has(item.path)) selectedGalleryPaths.delete(item.path);
@@ -858,11 +909,7 @@ function renderGalleryImage(item: GalleryImage): HTMLElement {
     else { notify("За один раз можно удалить не более 500 изображений."); return; }
     updateGallerySelection();
   });
-  button.addEventListener("pointerenter", () => {
-    window.clearTimeout(inspectorTimer);
-    inspectorTimer = window.setTimeout(() => inspectGalleryImage(item), 180);
-  });
-  button.addEventListener("pointerleave", () => window.clearTimeout(inspectorTimer));
+  button.addEventListener("dblclick", () => { if (!gallerySelectMode) showGalleryImage(item); });
   button.addEventListener("focus", () => inspectGalleryImage(item));
   button.addEventListener("contextmenu", (event) => {
     event.preventDefault();
@@ -919,13 +966,31 @@ function renderModel(model: ModelSummary): HTMLElement {
     gallery.append(button);
   }
   if (!model.images.length) gallery.append(make("div", "no-preview", "Нет изображений"));
+  if (model.images.length > 1) gallery.append(make("span", "model-gallery-count", `${model.images.length} фото · прокрутите`));
   const body = make("div", "model-body");
-  const type = make("span", "model-type", model.type);
-  const title = make("h2", "", model.name);
-  const id = make("span", "model-id", `ID ${model.id}`);
   const head = make("div", "model-head");
-  head.append(title, id);
-  body.append(type, head);
+  const title = make("h2", "", model.name);
+  const sizeLabel = make("span", "model-file-size");
+  head.append(title, sizeLabel);
+  const tags = make("div", "model-tags");
+  tags.append(make("span", "model-type", model.type === "Checkpoint" ? "Чекпоинт" : model.type));
+  const baseModel = model.files[0]?.baseModel;
+  if (baseModel) tags.append(make("span", "", baseModel));
+  for (const tag of model.tags.filter((tag) => tag.toLowerCase() !== baseModel?.toLowerCase()).slice(0, 2)) tags.append(make("span", "", tag));
+  const plainDescription = (model.description ?? "").replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'").replace(/\s+/g, " ").trim();
+  const description = make("p", "model-description", plainDescription.slice(0, 360)
+    || `Модель ${model.type}. Просмотрите примеры и выберите файл для загрузки.`);
+  const metadata = make("div", "model-metadata");
+  if (model.downloadCount !== null) metadata.append(make("span", "", `↓ ${new Intl.NumberFormat("ru-RU", { notation: "compact" }).format(model.downloadCount)}`));
+  if (model.favoriteCount !== null) metadata.append(make("span", "", `♡ ${new Intl.NumberFormat("ru-RU", { notation: "compact" }).format(model.favoriteCount)}`));
+  if (model.creator) metadata.append(make("span", "", `♙ ${model.creator}`));
+  if (model.updatedAt) {
+    const date = new Date(model.updatedAt);
+    if (!Number.isNaN(date.getTime())) metadata.append(make("span", "", `▣ ${date.toLocaleDateString("ru-RU")}`));
+  }
+  body.append(head, tags, description, metadata);
   const footer = make("div", "model-footer");
   if (model.files.length) {
     const select = make("select", "file-select");
@@ -935,7 +1000,7 @@ function renderModel(model: ModelSummary): HTMLElement {
       option.value = String(index);
       select.append(option);
     }
-    const button = make("button", "download-button", "Скачать ↓");
+    const button = make("button", "download-button", "↓ Скачать");
     button.type = "button";
     const supportedFolder = /^(checkpoint)$/i.test(model.type) ? "Stable-diffusion"
       : /^(lora|locon|lycoris|dora)$/i.test(model.type) ? "Lora"
@@ -946,11 +1011,13 @@ function renderModel(model: ModelSummary): HTMLElement {
     button.addEventListener("click", () => {
       const file = model.files[Number(select.value)];
       if (!file) return;
-      downloadManager.enqueue(file, model.type, model.name);
+      downloadManager.enqueue(file, model.type, model.name, model.images[0] ?? null);
     });
     const compatibility = make("small", "model-compatibility");
     const describe = (): void => {
-      const base = model.files[Number(select.value)]?.baseModel ?? "";
+      const file = model.files[Number(select.value)];
+      const base = file?.baseModel ?? "";
+      sizeLabel.textContent = file?.sizeKb ? `${(file.sizeKb / 1024 / 1024).toFixed(2)} ГБ` : "Размер неизвестен";
       compatibility.textContent = supportedFolder === null
         ? "Этот тип пока нельзя установить автоматически."
         : (base.toLowerCase().includes("sdxl") || base.toLowerCase().includes("illustrious")
@@ -987,7 +1054,8 @@ async function searchModels(): Promise<void> {
   catalogStatus.hidden = false;
   modelGrid.replaceChildren();
   try {
-    const models = await window.flow.searchModels(searchInput.value);
+    const sort = element<HTMLSelectElement>("model-sort").value as "popular" | "newest" | "rated";
+    const models = await window.flow.searchModels(searchInput.value, sort, activeModelFilter);
     if (sequence !== searchSequence) return;
     catalogModels = models;
     renderCatalog();
@@ -1000,11 +1068,12 @@ async function searchModels(): Promise<void> {
 function onTask(event: TaskEvent): void {
   if (["starting", "cloning", "dependencies", "ready", "done", "error", "cancelled"].includes(event.phase)) {
     const entry = make("li", "", event.message.slice(0, 180));
+    entry.dataset.phase = event.phase;
     const time = make("time", "", new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }));
     entry.prepend(time);
     if (homeActivityList.firstElementChild?.textContent === "События установки и запуска появятся здесь.") homeActivityList.replaceChildren();
     homeActivityList.prepend(entry);
-    while (homeActivityList.children.length > 4) homeActivityList.lastElementChild?.remove();
+    while (homeActivityList.children.length > 5) homeActivityList.lastElementChild?.remove();
   }
   if (event.kind === "install" || event.kind === "launch" || event.kind === "xformers") {
     const label = event.kind === "install" ? "Установка" : event.kind === "xformers" ? "xformers" : "WebUI";
@@ -1051,11 +1120,15 @@ function onTask(event: TaskEvent): void {
     }
     if (event.phase === "stabilizing") setConsoleStatus("Подготовка WebUI", "running");
     if (event.phase === "ready" && event.url) {
+      webuiStartedAt = Date.now();
+      updateHomeUptime();
       setConsoleStatus("WebUI запущен", "running");
       void refreshState();
     }
     if (event.phase === "stopping") setConsoleStatus("Остановка WebUI", "running");
     if (event.phase === "done" || event.phase === "error") {
+      webuiStartedAt = null;
+      updateHomeUptime();
       stoppingWebui = false;
       webuiRunning = false;
       updateConsoleControls();
@@ -1254,10 +1327,26 @@ consoleCancel.addEventListener("click", async () => {
 element<HTMLButtonElement>("close-image").addEventListener("click", () => imageDialog.close());
 galleryRefresh.addEventListener("click", () => void refreshGallery());
 gallerySearch.addEventListener("input", () => { setGallerySelectMode(false); renderGalleryFiltered(); });
+function updateGalleryKindButtons(): void {
+  document.querySelectorAll<HTMLButtonElement>(".gallery-kind-filter").forEach((button) => {
+    const active = !showOnlyFavorites && button.dataset.galleryKind === galleryKind;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  galleryFavoritesToggle.classList.toggle("active", showOnlyFavorites);
+  galleryFavoritesToggle.setAttribute("aria-pressed", String(showOnlyFavorites));
+}
+document.querySelectorAll<HTMLButtonElement>(".gallery-kind-filter").forEach((button) => button.addEventListener("click", () => {
+  galleryKind = button.dataset.galleryKind === "txt2img" ? "txt2img" : button.dataset.galleryKind === "img2img" ? "img2img" : "all";
+  showOnlyFavorites = false;
+  updateGalleryKindButtons();
+  setGallerySelectMode(false);
+  renderGalleryFiltered();
+}));
 galleryFavoritesToggle.addEventListener("click", () => {
   showOnlyFavorites = !showOnlyFavorites;
-  galleryFavoritesToggle.setAttribute("aria-pressed", String(showOnlyFavorites));
-  galleryFavoritesToggle.classList.toggle("active", showOnlyFavorites);
+  galleryKind = "all";
+  updateGalleryKindButtons();
   setGallerySelectMode(false);
   renderGalleryFiltered();
 });
@@ -1269,13 +1358,14 @@ element<HTMLButtonElement>("favorite-gallery-image").addEventListener("click", (
 gallerySelect.addEventListener("click", () => setGallerySelectMode(!gallerySelectMode));
 galleryDelete.addEventListener("click", () => {
   if (selectedGalleryPaths.size === 0) return;
+  pendingGalleryDeletePaths = [...selectedGalleryPaths];
   element<HTMLElement>("gallery-delete-message").textContent =
-    "Удалить " + selectedGalleryPaths.size + " изображений без возможности восстановления?";
+    "Удалить " + pendingGalleryDeletePaths.length + " изображений без возможности восстановления?";
   galleryDeleteDialog.showModal();
 });
 element<HTMLButtonElement>("cancel-gallery-delete").addEventListener("click", () => galleryDeleteDialog.close());
 galleryDeleteConfirm.addEventListener("click", async () => {
-  const paths = [...selectedGalleryPaths];
+  const paths = [...pendingGalleryDeletePaths];
   if (paths.length === 0) { galleryDeleteDialog.close(); return; }
   galleryDeleteConfirm.disabled = true;
   try {
@@ -1284,6 +1374,7 @@ galleryDeleteConfirm.addEventListener("click", async () => {
   } catch (error) {
     notify("Не удалось удалить изображения: " + message(error));
   } finally {
+    pendingGalleryDeletePaths = [];
     galleryDeleteConfirm.disabled = false;
     galleryDeleteDialog.close();
     await refreshGallery();
@@ -1325,9 +1416,10 @@ document.querySelectorAll<HTMLButtonElement>(".model-filter").forEach((button) =
       item.classList.toggle("active", active);
       item.setAttribute("aria-pressed", String(active));
     });
-    if (hasLoadedCatalog) renderCatalog();
+    if (hasLoadedCatalog) void searchModels();
   });
 });
+element<HTMLSelectElement>("model-sort").addEventListener("change", () => { if (hasLoadedCatalog) void searchModels(); });
 searchInput.addEventListener("input", () => {
   window.clearTimeout(debounceTimer);
   debounceTimer = window.setTimeout(() => void searchModels(), 400);
@@ -1382,6 +1474,18 @@ installFlowUpdateButton.addEventListener("click", async () => {
 });
 element<HTMLButtonElement>("open-flow-releases").addEventListener("click", () => void window.flow.openFlowReleases().catch((error: unknown) => notify(message(error))));
 element<HTMLButtonElement>("open-gallery-home").addEventListener("click", () => showPage("gallery"));
+element<HTMLButtonElement>("home-show-logs").addEventListener("click", () => setConsoleVisible(true));
+for (const tab of ["parameters", "file"] as const) {
+  element<HTMLButtonElement>(`inspector-tab-${tab}`).addEventListener("click", () => {
+    for (const name of ["parameters", "file"] as const) {
+      const active = name === tab;
+      const button = element<HTMLButtonElement>(`inspector-tab-${name}`);
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+      element<HTMLElement>(`inspector-${name}`).hidden = !active;
+    }
+  });
+}
 element<HTMLButtonElement>("inspector-open").addEventListener("click", () => {
   if (inspectedGalleryImage) showGalleryImage(inspectedGalleryImage);
 });
@@ -1392,6 +1496,13 @@ element<HTMLButtonElement>("inspector-copy").addEventListener("click", async () 
 });
 element<HTMLButtonElement>("inspector-favorite").addEventListener("click", () => {
   if (inspectedGalleryImage) toggleGalleryFavorite(inspectedGalleryImage);
+});
+element<HTMLButtonElement>("inspector-delete").addEventListener("click", () => {
+  if (!inspectedGalleryImage) return;
+  pendingGalleryDeletePaths = [inspectedGalleryImage.path];
+  element<HTMLElement>("gallery-delete-message").textContent =
+    `Удалить ${inspectedGalleryImage.fileName} без возможности восстановления?`;
+  galleryDeleteDialog.showModal();
 });
 element<HTMLButtonElement>("theme-toggle").addEventListener("click", () => {
   showPage("settings");
@@ -1414,6 +1525,8 @@ const firstRun = new FirstRunController(
 void firstRun.start().catch((error: unknown) => notify(message(error)));
 void refreshState();
 void refreshHomeRecent();
+document.body.dataset.page = "home";
+window.setInterval(updateHomeUptime, 60_000);
 window.setInterval(() => { if (document.visibilityState === "visible") void refreshWebUIStatus(); }, 15_000);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") void refreshWebUIStatus(); });
 void downloadManager.restore().catch((error: unknown) => notify(message(error)));

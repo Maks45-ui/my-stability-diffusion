@@ -14,6 +14,7 @@ interface DownloadItem {
   bytesPerSecond: number;
   error: string | null;
   resume: boolean;
+  previewUrl: string | null;
 }
 
 const STATUS_TEXT: Record<DownloadStatus, string> = {
@@ -78,13 +79,13 @@ export class DownloadManager {
     this.updateCount();
   }
 
-  enqueue(file: ModelFile, modelType: string, modelName: string): string | null {
+  enqueue(file: ModelFile, modelType: string, modelName: string, previewUrl: string | null = null): string | null {
     const duplicate = [...this.items.values()].some((item) => item.file.name === file.name && item.modelType === modelType);
     if (duplicate) { this.notify("Этот файл уже находится в списке загрузок."); return null; }
     const item: DownloadItem = {
       id: crypto.randomUUID(), modelName, modelType, file, status: "queued",
       percent: 0, bytesDownloaded: 0, totalBytes: Math.max(0, file.sizeKb * 1024),
-      bytesPerSecond: 0, error: null, resume: false
+      bytesPerSecond: 0, error: null, resume: false, previewUrl
     };
     this.add(item);
     this.pump();
@@ -137,7 +138,7 @@ export class DownloadManager {
       status: paused ? "paused" : "completed",
       percent: paused ? (file.sizeBytes > 0 ? Math.min(100, Math.floor(file.downloadedBytes / file.sizeBytes * 100)) : null) : 100,
       bytesDownloaded: file.downloadedBytes,
-      totalBytes: file.sizeBytes, bytesPerSecond: 0, error: null, resume: paused
+      totalBytes: file.sizeBytes, bytesPerSecond: 0, error: null, resume: paused, previewUrl: null
     });
   }
 
@@ -174,6 +175,13 @@ export class DownloadManager {
     card.dataset.id = item.id;
     const icon = node("span", "download-card-icon", item.modelType.toLowerCase().includes("lora") ? "✦" : "◈");
     icon.setAttribute("aria-hidden", "true");
+    if (item.previewUrl) {
+      const image = node("img", "download-preview");
+      image.alt = "";
+      image.loading = "lazy";
+      icon.replaceChildren(image);
+      void this.api.getPreview(item.previewUrl).then((src) => { if (card.isConnected) image.src = src; }).catch(() => { icon.textContent = "◈"; });
+    }
     const content = node("div", "download-card-content");
     const heading = node("div", "download-card-heading");
     const title = node("div", "download-card-title");
@@ -303,3 +311,4 @@ export class DownloadManager {
     catch (error) { this.notify(errorMessage(error)); }
   }
 }
+

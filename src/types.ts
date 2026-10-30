@@ -95,6 +95,12 @@ export interface ModelSummary {
   id: number;
   name: string;
   type: string;
+  description: string | null;
+  tags: string[];
+  creator: string | null;
+  downloadCount: number | null;
+  favoriteCount: number | null;
+  updatedAt: string | null;
   images: string[];
   files: ModelFile[];
 }
@@ -147,7 +153,7 @@ export interface FlowAPI {
   getGalleryImageDetails(path: string): Promise<GalleryImageDetails>;
   copyGalleryImage(path: string): Promise<void>;
   deleteGalleryImages(paths: string[]): Promise<number>;
-  searchModels(query: string): Promise<ModelSummary[]>;
+  searchModels(query: string, sort: "popular" | "newest" | "rated", modelType: string): Promise<ModelSummary[]>;
   getStarterModel(key: string): Promise<StarterModel>;
   downloadModel(file: ModelFile, type: string, taskId: string, resume: boolean): Promise<void>;
   pauseDownload(): Promise<void>;
@@ -178,3 +184,4 @@ declare global {
     flow: FlowAPI;
   }
 }
+

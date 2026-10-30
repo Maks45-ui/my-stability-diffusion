@@ -60,6 +60,12 @@ pub(crate) struct ModelSummary {
     name: String,
     #[serde(rename = "type")]
     model_type: String,
+    description: Option<String>,
+    tags: Vec<String>,
+    creator: Option<String>,
+    download_count: Option<u64>,
+    favorite_count: Option<u64>,
+    updated_at: Option<String>,
     images: Vec<String>,
     files: Vec<ModelFile>,
 }
@@ -129,12 +135,24 @@ fn client() -> Result<reqwest::Client, String> {
 }
 
 #[tauri::command]
-pub(crate) async fn search_models(app: AppHandle, query: String) -> Result<Vec<ModelSummary>, String> {
+pub(crate) async fn search_models(app: AppHandle, query: String, sort: String, model_type: String) -> Result<Vec<ModelSummary>, String> {
     let trimmed = query.trim();
-    let mut request = client()?.get(API).query(&[("limit", "12"), ("nsfw", "true")]);
+    let sorting = match sort.as_str() {
+        "newest" => "Newest",
+        "rated" => "Highest Rated",
+        _ => "Most Downloaded",
+    };
+    let mut request = client()?.get(API).query(&[("limit", "12"), ("nsfw", "true"), ("sort", sorting)]);
+    let category = match model_type.as_str() {
+        "checkpoint" => Some("Checkpoint"),
+        "lora" => Some("LORA"),
+        "vae" => Some("VAE"),
+        _ => None,
+    };
+    if let Some(category) = category { request = request.query(&[("types", category)]); }
     if !trimmed.is_empty() {
         request = if trimmed.parse::<u64>().is_ok() { request.query(&[("ids", trimmed)]) } else { request.query(&[("query", trimmed)]) };
-    } else { request = request.query(&[("sort", "Most Downloaded")]); }
+    }
     let token = civitai_token(&app)?;
     if !token.is_empty() { request = request.bearer_auth(token); }
     let response = request.send().await.map_err(|error| error.to_string())?.error_for_status().map_err(|error| error.to_string())?;
@@ -178,6 +196,14 @@ pub(crate) async fn search_models(app: AppHandle, query: String) -> Result<Vec<M
             id,
             name: model.get("name").and_then(Value::as_str).unwrap_or("Без названия").to_owned(),
             model_type: model.get("type").and_then(Value::as_str).unwrap_or("Модель").to_owned(),
+            description: model.get("description").and_then(Value::as_str)
+                .map(|value| value.chars().take(5_000).collect()),
+            tags: model.get("tags").and_then(Value::as_array).map(|values| values.iter()
+                .filter_map(Value::as_str).take(3).map(str::to_owned).collect()).unwrap_or_default(),
+            creator: model.pointer("/creator/username").and_then(Value::as_str).map(str::to_owned),
+            download_count: model.pointer("/stats/downloadCount").and_then(Value::as_u64),
+            favorite_count: model.pointer("/stats/favoriteCount").or_else(|| model.pointer("/stats/thumbsUpCount")).and_then(Value::as_u64),
+            updated_at: model.get("updatedAt").or_else(|| model.pointer("/modelVersions/0/publishedAt")).and_then(Value::as_str).map(str::to_owned),
             images,
             files,
         })
@@ -496,3 +522,4 @@ mod tests {
         fs::remove_file(path).unwrap();
     }
 }
+
