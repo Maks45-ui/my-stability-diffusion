@@ -79,22 +79,22 @@ html[data-theme="light"] {
 
 html[data-theme="pink"] {
   color-scheme: light;
-  --bg: #fbf3f6;
-  --sidebar: #fff7fa;
-  --panel: #ffffff;
-  --surface: #f8eaf0;
-  --line: #e7cfd9;
-  --text: #3b2632;
-  --muted: #695564;
-  --text-subtle: #876f7b;
-  --accent: #a4376d;
-  --accent-hover: #8f2a5e;
-  --accent-soft: #f7dfeb;
+  --bg: #f4cbdd;
+  --sidebar: #edb6cd;
+  --panel: #fbe1eb;
+  --surface: #f1c4d8;
+  --line: #d49cb5;
+  --text: #3c1730;
+  --muted: #664358;
+  --text-subtle: #80566c;
+  --accent: #95204f;
+  --accent-hover: #7c1742;
+  --accent-soft: #e8acc6;
   --on-accent: #ffffff;
-  --success: #3d8367;
-  --warning: #9e672b;
-  --danger: #b44759;
-  --overlay: rgba(59, 38, 50, .32);
+  --success: #276d54;
+  --warning: #875015;
+  --danger: #a32942;
+  --overlay: rgba(60, 23, 48, .42);
 }
 
 html[data-theme="zakaz"] {
