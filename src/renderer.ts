@@ -54,6 +54,9 @@ const galleryDeleteConfirm = element<HTMLButtonElement>("confirm-gallery-delete"
 const modelGrid = element<HTMLElement>("model-grid");
 const catalogStatus = element<HTMLElement>("catalog-status");
 const searchInput = element<HTMLInputElement>("model-search");
+const homeRecentGrid = element<HTMLElement>("home-recent-grid");
+const homeActivityList = element<HTMLOListElement>("home-activity-list");
+const inspectorImage = element<HTMLImageElement>("inspector-image");
 const downloadManager = new DownloadManager(
   flowApi,
   element<HTMLElement>("download-list"),
@@ -69,8 +72,14 @@ new ThemeController(
   element<HTMLElement>("theme-toggle-icon")
 );
 let hasLoadedCatalog = false;
+let catalogModels: ModelSummary[] = [];
+let activeModelFilter = "all";
 let searchSequence = 0;
 let gallerySequence = 0;
+let homeRecentSequence = 0;
+let inspectorSequence = 0;
+let inspectorTimer: number | undefined;
+let inspectedGalleryImage: GalleryImage | null = null;
 
 let galleryItems: GalleryImage[] = [];
 let showOnlyFavorites = false;
@@ -422,6 +431,7 @@ function showPage(page: Page): void {
   }
   if (page === "gallery") void refreshGallery();
   else hideGalleryContextMenu();
+  if (page === "home") void refreshHomeRecent();
 }
 
 function renderPackages(state: AppState): void {
@@ -649,6 +659,79 @@ function showGalleryContextMenu(item: GalleryImage, x: number, y: number): void 
   galleryContextMenu.style.top = Math.max(8, Math.min(relativeY, height - galleryContextMenu.offsetHeight - 8)) + "px";
 }
 
+function renderHomeRecent(images: GalleryImage[]): void {
+  homeRecentGrid.replaceChildren();
+  if (images.length === 0) {
+    homeRecentGrid.append(make("p", "home-placeholder", "Изображения появятся после генерации."));
+    return;
+  }
+  for (const item of images.slice(0, 4)) {
+    const button = make("button", "home-recent-image");
+    button.type = "button";
+    button.title = item.fileName;
+    button.setAttribute("aria-label", "Открыть " + item.fileName);
+    const image = make("img");
+    image.alt = item.fileName;
+    image.loading = "lazy";
+    image.src = convertFileSrc(item.path);
+    button.append(image);
+    button.addEventListener("click", () => showGalleryImage(item));
+    homeRecentGrid.append(button);
+  }
+}
+
+async function refreshHomeRecent(): Promise<void> {
+  const sequence = ++homeRecentSequence;
+  try {
+    const images = await window.flow.listGalleryImages();
+    if (sequence === homeRecentSequence) renderHomeRecent(images);
+  } catch {
+    if (sequence === homeRecentSequence) renderHomeRecent([]);
+  }
+}
+
+function updateInspectorFavorite(): void {
+  const button = element<HTMLButtonElement>("inspector-favorite");
+  button.textContent = inspectedGalleryImage && galleryFavorites.has(inspectedGalleryImage.path)
+    ? "★ В избранном" : "☆ В избранное";
+}
+
+function inspectGalleryImage(item: GalleryImage | null): void {
+  const sequence = ++inspectorSequence;
+  inspectedGalleryImage = item;
+  const hasImage = item !== null;
+  for (const id of ["inspector-open", "inspector-copy", "inspector-favorite"]) {
+    element<HTMLButtonElement>(id).disabled = !hasImage;
+  }
+  updateInspectorFavorite();
+  element<HTMLElement>("inspector-placeholder").hidden = hasImage;
+  inspectorImage.hidden = !hasImage;
+  element<HTMLElement>("inspector-name").textContent = item?.fileName ?? "—";
+  element<HTMLElement>("inspector-status").textContent = hasImage ? "Читаем параметры изображения…" : "Параметры PNG появятся здесь.";
+  for (const id of ["model", "size", "seed", "steps", "sampler", "prompt"]) {
+    element<HTMLElement>("inspector-" + id).textContent = "—";
+  }
+  if (!item) { inspectorImage.removeAttribute("src"); return; }
+  inspectorImage.onload = () => {
+    if (sequence === inspectorSequence) element<HTMLElement>("inspector-size").textContent = `${inspectorImage.naturalWidth} × ${inspectorImage.naturalHeight}`;
+  };
+  inspectorImage.onerror = () => {
+    if (sequence === inspectorSequence) element<HTMLElement>("inspector-status").textContent = "Превью недоступно.";
+  };
+  inspectorImage.src = convertFileSrc(item.path);
+  void window.flow.getGalleryImageDetails(item.path).then((details) => {
+    if (sequence !== inspectorSequence) return;
+    element<HTMLElement>("inspector-status").textContent = details.parameters ? "Параметры из PNG" : "В файле нет параметров генерации PNG.";
+    element<HTMLElement>("inspector-model").textContent = details.model ?? "—";
+    element<HTMLElement>("inspector-seed").textContent = details.seed ?? "—";
+    element<HTMLElement>("inspector-steps").textContent = details.steps ?? "—";
+    element<HTMLElement>("inspector-sampler").textContent = details.sampler ?? "—";
+    element<HTMLElement>("inspector-prompt").textContent = details.prompt ?? "—";
+  }).catch((error: unknown) => {
+    if (sequence === inspectorSequence) element<HTMLElement>("inspector-status").textContent = "Параметры недоступны: " + message(error);
+  });
+}
+
 function renderGalleryFiltered(): void {
   const query = gallerySearch.value.trim().toLocaleLowerCase("ru-RU");
   const images = galleryItems.filter((item) =>
@@ -657,6 +740,7 @@ function renderGalleryFiltered(): void {
   const fragment = document.createDocumentFragment();
   for (const image of images) fragment.append(renderGalleryImage(image));
   galleryGrid.replaceChildren(fragment);
+  if (!images.some((item) => item.path === inspectedGalleryImage?.path)) inspectGalleryImage(images[0] ?? null);
   galleryCount.textContent = galleryItems.length + " изображений";
   galleryEmpty.hidden = galleryItems.length > 0;
   galleryStatus.hidden = images.length > 0 || galleryItems.length === 0;
@@ -671,6 +755,7 @@ function toggleGalleryFavorite(item: GalleryImage): void {
   try { localStorage.setItem("flow.gallery.favorites", JSON.stringify([...galleryFavorites])); }
   catch { notify("Не удалось сохранить избранное."); }
   renderGalleryFiltered();
+  updateInspectorFavorite();
 }
 
 function showGalleryDetails(item: GalleryImage): void {
@@ -725,6 +810,7 @@ function setGallerySelectMode(enabled: boolean): void {
 }
 
 function showGalleryImage(item: GalleryImage): void {
+  inspectGalleryImage(item);
   const image = element<HTMLImageElement>("full-image");
   image.removeAttribute("src");
   image.alt = item.fileName;
@@ -772,6 +858,12 @@ function renderGalleryImage(item: GalleryImage): HTMLElement {
     else { notify("За один раз можно удалить не более 500 изображений."); return; }
     updateGallerySelection();
   });
+  button.addEventListener("pointerenter", () => {
+    window.clearTimeout(inspectorTimer);
+    inspectorTimer = window.setTimeout(() => inspectGalleryImage(item), 180);
+  });
+  button.addEventListener("pointerleave", () => window.clearTimeout(inspectorTimer));
+  button.addEventListener("focus", () => inspectGalleryImage(item));
   button.addEventListener("contextmenu", (event) => {
     event.preventDefault();
     const rect = button.getBoundingClientRect();
@@ -794,11 +886,13 @@ async function refreshGallery(): Promise<void> {
     if (sequence !== gallerySequence) return;
 
     galleryItems = images;
+    renderHomeRecent(images);
     renderGalleryFiltered();
   } catch (error) {
     if (sequence !== gallerySequence) return;
 
     galleryItems = [];
+    inspectGalleryImage(null);
     galleryStatus.textContent = "Не удалось загрузить галерею: " + message(error);
   } finally {
     if (sequence === gallerySequence) {
@@ -874,17 +968,29 @@ function renderModel(model: ModelSummary): HTMLElement {
   return card;
 }
 
+function renderCatalog(): void {
+  const filtered = activeModelFilter === "all" ? catalogModels
+    : catalogModels.filter((model) => activeModelFilter === "lora"
+      ? /^(lora|locon|lycoris|dora)$/i.test(model.type)
+      : model.type.toLowerCase() === activeModelFilter);
+  modelGrid.replaceChildren(...filtered.map(renderModel));
+  catalogStatus.hidden = filtered.length > 0;
+  if (!filtered.length) catalogStatus.textContent = catalogModels.length > 0
+    ? "В этой категории моделей нет. Выберите другой тип или измените запрос."
+    : "Модели не найдены. Попробуйте другой запрос.";
+}
+
 async function searchModels(): Promise<void> {
   const sequence = ++searchSequence;
+  catalogModels = [];
   catalogStatus.textContent = "Загружаем модели…";
   catalogStatus.hidden = false;
   modelGrid.replaceChildren();
   try {
     const models = await window.flow.searchModels(searchInput.value);
     if (sequence !== searchSequence) return;
-    catalogStatus.hidden = models.length > 0;
-    if (!models.length) catalogStatus.textContent = "Модели не найдены. Попробуйте другой запрос.";
-    modelGrid.append(...models.map(renderModel));
+    catalogModels = models;
+    renderCatalog();
   } catch (error) {
     if (sequence !== searchSequence) return;
     catalogStatus.textContent = message(error);
@@ -892,6 +998,14 @@ async function searchModels(): Promise<void> {
 }
 
 function onTask(event: TaskEvent): void {
+  if (["starting", "cloning", "dependencies", "ready", "done", "error", "cancelled"].includes(event.phase)) {
+    const entry = make("li", "", event.message.slice(0, 180));
+    const time = make("time", "", new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }));
+    entry.prepend(time);
+    if (homeActivityList.firstElementChild?.textContent === "События установки и запуска появятся здесь.") homeActivityList.replaceChildren();
+    homeActivityList.prepend(entry);
+    while (homeActivityList.children.length > 4) homeActivityList.lastElementChild?.remove();
+  }
   if (event.kind === "install" || event.kind === "launch" || event.kind === "xformers") {
     const label = event.kind === "install" ? "Установка" : event.kind === "xformers" ? "xformers" : "WebUI";
     queueLog(terminal, `[${label}] ${event.message}`);
@@ -1203,6 +1317,17 @@ document.addEventListener("keydown", (event) => {
 });
 window.addEventListener("scroll", hideGalleryContextMenu, true);
 element<HTMLButtonElement>("search-button").addEventListener("click", () => void searchModels());
+document.querySelectorAll<HTMLButtonElement>(".model-filter").forEach((button) => {
+  button.addEventListener("click", () => {
+    activeModelFilter = button.dataset.modelType ?? "all";
+    document.querySelectorAll<HTMLButtonElement>(".model-filter").forEach((item) => {
+      const active = item === button;
+      item.classList.toggle("active", active);
+      item.setAttribute("aria-pressed", String(active));
+    });
+    if (hasLoadedCatalog) renderCatalog();
+  });
+});
 searchInput.addEventListener("input", () => {
   window.clearTimeout(debounceTimer);
   debounceTimer = window.setTimeout(() => void searchModels(), 400);
@@ -1256,6 +1381,18 @@ installFlowUpdateButton.addEventListener("click", async () => {
   }
 });
 element<HTMLButtonElement>("open-flow-releases").addEventListener("click", () => void window.flow.openFlowReleases().catch((error: unknown) => notify(message(error))));
+element<HTMLButtonElement>("open-gallery-home").addEventListener("click", () => showPage("gallery"));
+element<HTMLButtonElement>("inspector-open").addEventListener("click", () => {
+  if (inspectedGalleryImage) showGalleryImage(inspectedGalleryImage);
+});
+element<HTMLButtonElement>("inspector-copy").addEventListener("click", async () => {
+  if (!inspectedGalleryImage) return;
+  try { await window.flow.copyGalleryImage(inspectedGalleryImage.path); notify("Изображение скопировано. Вставьте его через Ctrl+V."); }
+  catch (error) { notify("Не удалось скопировать изображение: " + message(error)); }
+});
+element<HTMLButtonElement>("inspector-favorite").addEventListener("click", () => {
+  if (inspectedGalleryImage) toggleGalleryFavorite(inspectedGalleryImage);
+});
 element<HTMLButtonElement>("theme-toggle").addEventListener("click", () => {
   showPage("settings");
   element<HTMLElement>("theme-picker").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1276,8 +1413,10 @@ const firstRun = new FirstRunController(
 );
 void firstRun.start().catch((error: unknown) => notify(message(error)));
 void refreshState();
+void refreshHomeRecent();
 window.setInterval(() => { if (document.visibilityState === "visible") void refreshWebUIStatus(); }, 15_000);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") void refreshWebUIStatus(); });
 void downloadManager.restore().catch((error: unknown) => notify(message(error)));
 void window.flow.setPage("home").catch(() => { /* Discord may be unavailable. */ });
+
 
