@@ -1183,7 +1183,7 @@ menuToggle.addEventListener("click", () => {
   menuToggle.setAttribute("aria-expanded", String(!collapsed));
   // Covers reduced motion and cases where a width transition is cancelled.
   sidebarAnimationTimer = window.setTimeout(finishSidebarAnimation, 360);
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || window.matchMedia("(max-width: 760px)").matches) {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
     finishSidebarAnimation();
   }
 });
