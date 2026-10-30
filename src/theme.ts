@@ -13,6 +13,7 @@ const OPTIONS: readonly ThemeOption[] = [
   { id: "light", label: "Светлая", description: "Чистый нейтральный фон", group: "standard" },
   { id: "dark", label: "Тёмная", description: "Графит и холодный синий", group: "standard" },
   { id: "system", label: "Системная", description: "Следует за Windows", group: "standard" },
+  { id: "pink", label: "Розовая", description: "Светлая пудра и ягодный акцент", group: "extra" },
   { id: "zakaz", label: "Заказ", description: "Уголь, янтарь и бордо", group: "extra" },
   { id: "crimson-moon", label: "Багровая Луна", description: "Уголь и приглушённый красный", group: "extra" },
   { id: "blueviolet-dusk", label: "Синелетовые сумерки", description: "Холодный синий и лаванда", group: "extra" },
@@ -103,7 +104,7 @@ export class ThemeController {
     this.stateLabel.textContent = this.state.selected === "system"
       ? `${name} · ${this.state.resolved === "dark" ? "тёмная" : "светлая"}` : name;
     this.headerLabel.textContent = name;
-    this.headerIcon.textContent = boykisser ? "♪" : this.state.resolved === "light" ? "☀" : "☾";
+    this.headerIcon.textContent = boykisser ? "♪" : this.state.resolved === "light" || this.state.resolved === "pink" ? "☀" : "☾";
     for (const [id, button] of this.buttons) {
       const selected = id === this.state.selected;
       button.classList.toggle("selected", selected);
@@ -117,3 +118,4 @@ export class ThemeController {
     try { localStorage.setItem(STORAGE_KEY, theme); } catch { /* The choice still applies to this window. */ }
   }
 }
+

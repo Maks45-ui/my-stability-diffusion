@@ -77,6 +77,26 @@ html[data-theme="light"] {
   --overlay: rgba(32, 40, 51, .34);
 }
 
+html[data-theme="pink"] {
+  color-scheme: light;
+  --bg: #fbf3f6;
+  --sidebar: #fff7fa;
+  --panel: #ffffff;
+  --surface: #f8eaf0;
+  --line: #e7cfd9;
+  --text: #3b2632;
+  --muted: #695564;
+  --text-subtle: #876f7b;
+  --accent: #a4376d;
+  --accent-hover: #8f2a5e;
+  --accent-soft: #f7dfeb;
+  --on-accent: #ffffff;
+  --success: #3d8367;
+  --warning: #9e672b;
+  --danger: #b44759;
+  --overlay: rgba(59, 38, 50, .32);
+}
+
 html[data-theme="zakaz"] {
   color-scheme: dark;
   --bg: #151412;
@@ -156,3 +176,4 @@ html[data-theme="boykisser"] {
   --danger: #ab4557;
   --overlay: rgba(31, 28, 32, .32);
 }
+
